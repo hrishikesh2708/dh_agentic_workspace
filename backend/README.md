@@ -9,7 +9,7 @@ A production-ready template for building AI agent backends with FastAPI and Lang
 - **LangGraph** stateful agent with checkpointing, tool calling, and human-in-the-loop support
 - **Long-term memory** via mem0 + pgvector — semantic search per user, cache-backed
 - **LLM service** with circular model fallback, exponential backoff retries, and total timeout budget
-- **Langfuse** tracing on all LLM calls; Prometheus metrics + Grafana dashboards
+- **LangSmith** tracing on all LLM calls; Prometheus metrics + Grafana dashboards
 - **JWT auth** with session management; rate limiting via slowapi
 - **Alembic** migrations; optional Valkey/Redis cache layer
 - **Structured logging** with request/session/user context on every line
@@ -38,7 +38,7 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) to see the interac
 | [Database & Migrations](docs/database.md) | Schema, Alembic migrations, pgvector |
 | [LLM Service](docs/llm-service.md) | Models, retries, fallback, timeout budget |
 | [Memory](docs/memory.md) | mem0 long-term memory, cache layer |
-| [Observability](docs/observability.md) | Langfuse, structured logging, Prometheus, profiling |
+| [Observability](docs/observability.md) | LangSmith, structured logging, Prometheus, profiling |
 | [Evaluation](docs/evaluation.md) | Eval framework, custom metrics, reports |
 | [Docker](docs/docker.md) | Docker, Compose, full monitoring stack |
 
@@ -79,7 +79,7 @@ See [LICENSE](LICENSE).
 A production-ready foundation for AI agent backends built on FastAPI + LangGraph. It bundles the components you'd otherwise wire up by hand: stateful conversations, long-term memory, tool calling, observability, rate limiting, and JWT auth.
 
 **How does this differ from a basic LangGraph setup?**
-The base LangGraph quickstart stops at "agent runs locally". This template adds Alembic migrations, mem0 + pgvector long-term memory, Langfuse tracing, Prometheus + Grafana dashboards, JWT sessions, slowapi rate limiting, structured logging with per-request context, and a circular-fallback LLM service — production concerns you'd otherwise build separately.
+The base LangGraph quickstart stops at "agent runs locally". This template adds Alembic migrations, mem0 + pgvector long-term memory, LangSmith tracing, Prometheus + Grafana dashboards, JWT sessions, slowapi rate limiting, structured logging with per-request context, and a circular-fallback LLM service — production concerns you'd otherwise build separately.
 
 ### Setup & Configuration
 
@@ -100,8 +100,8 @@ Drop a LangChain `@tool`-decorated function in `app/core/langgraph/tools/` and r
 **How does the LLM service handle failures?**
 Two layers: (1) per-call exponential-backoff retry via `tenacity`, (2) **circular fallback** — if the active model exhausts its retries, the service rotates to the next model in `LLMRegistry` and continues. A total timeout budget caps the whole call so latency stays bounded. See [docs/llm-service.md](docs/llm-service.md).
 
-**Can I use this without Langfuse?**
-Yes. Set `LANGFUSE_TRACING_ENABLED=false` (or omit the Langfuse keys). The agent runs unchanged; structured logs still capture request/session/user context.
+**Can I use this without LangSmith?**
+Yes. Set `LANGSMITH_TRACING_ENABLED=false` (or omit the LangSmith API key). The agent runs unchanged; structured logs still capture request/session/user context.
 
 ### Troubleshooting
 

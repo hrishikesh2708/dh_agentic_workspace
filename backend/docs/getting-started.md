@@ -6,7 +6,7 @@
 - [uv](https://docs.astral.sh/uv/) — `pip install uv`
 - Docker + Docker Compose (recommended for local dev)
 - OpenAI API key
-- Langfuse account (optional — set `LANGFUSE_TRACING_ENABLED=false` to skip)
+- LangSmith account (optional — set `LANGSMITH_TRACING_ENABLED=false` to skip)
 
 ## Option A: Docker (recommended)
 
@@ -19,7 +19,7 @@ cd my-agent
 # Copy and fill in your env file
 cp .env.example .env.development
 # Required: OPENAI_API_KEY, JWT_SECRET_KEY
-# Optional: LANGFUSE_* keys (or set LANGFUSE_TRACING_ENABLED=false)
+# Optional: LANGSMITH_* keys (or set LANGSMITH_TRACING_ENABLED=false)
 
 make install       # installs Python deps + pre-commit hooks
 make docker-up     # starts API (port 8000) + PostgreSQL
@@ -110,5 +110,5 @@ Make sure PostgreSQL is running and `POSTGRES_*` vars in your `.env` match. With
 **`detect-secrets` blocking a commit**
 If it's a false positive, add `# pragma: allowlist secret` to the end of the flagged line.
 
-**Langfuse errors**
-Set `LANGFUSE_TRACING_ENABLED=false` in your `.env` to disable tracing entirely during development.
+**LangSmith errors**
+Set `LANGSMITH_TRACING_ENABLED=false` in your `.env` to disable tracing entirely during development.

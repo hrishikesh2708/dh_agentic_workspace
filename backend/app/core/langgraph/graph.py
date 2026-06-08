@@ -8,7 +8,6 @@ from typing import (
 )
 from urllib.parse import quote_plus
 
-from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -48,7 +47,6 @@ from app.core.config import (
 from app.core.langgraph.tools import tools
 from app.core.logging import logger
 from app.core.metrics import llm_inference_duration_seconds
-from app.core.observability import langfuse_callback_handler
 from app.core.prompts import load_system_prompt
 from app.schemas import (
     GraphState,
@@ -294,10 +292,8 @@ class LangGraphAgent:
             list[Message]: The response from the LLM.
         """
         graph = await self._get_graph()
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
-            "callbacks": callbacks,
             "metadata": {
                 "user_id": user_id,
                 "username": username,
@@ -305,6 +301,7 @@ class LangGraphAgent:
                 "environment": settings.ENVIRONMENT.value,
                 "debug": settings.DEBUG,
             },
+            "tags": [settings.ENVIRONMENT.value, f"session:{session_id}"],
         }
 
         try:
@@ -364,10 +361,8 @@ class LangGraphAgent:
         Yields:
             str: Tokens of the LLM response.
         """
-        callbacks: list[BaseCallbackHandler] = [langfuse_callback_handler] if settings.LANGFUSE_TRACING_ENABLED else []
         config: RunnableConfig = {
             "configurable": {"thread_id": session_id},
-            "callbacks": callbacks,
             "metadata": {
                 "user_id": user_id,
                 "username": username,
@@ -375,6 +370,7 @@ class LangGraphAgent:
                 "environment": settings.ENVIRONMENT.value,
                 "debug": settings.DEBUG,
             },
+            "tags": [settings.ENVIRONMENT.value, f"session:{session_id}"],
         }
         graph = await self._get_graph()
 

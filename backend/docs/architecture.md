@@ -29,14 +29,14 @@ graph TB
     end
 
     subgraph Observability["Observability"]
-        Langfuse["Langfuse\n(LLM traces)"]
+        LangSmith["LangSmith\n(LLM traces)"]
         Prometheus["Prometheus\n+ Grafana"]
         Logs["structlog\n(JSON / console)"]
     end
 
     Client --> MW --> Auth --> API
     API --> Graph
-    Graph --> LLM --> Langfuse
+    Graph --> LLM --> LangSmith
     Graph --> Tools
     Graph --> Memory --> Cache
     Graph <--> Checkpointer

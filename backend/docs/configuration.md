@@ -86,14 +86,14 @@ When `VALKEY_HOST` is set, the app uses Valkey/Redis for memory search caching a
 
 ---
 
-## Observability (Langfuse)
+## Observability (LangSmith)
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `LANGFUSE_TRACING_ENABLED` | `true` | Set to `false` to disable tracing entirely |
-| `LANGFUSE_PUBLIC_KEY` | — | Langfuse project public key |
-| `LANGFUSE_SECRET_KEY` | — | Langfuse project secret key |
-| `LANGFUSE_HOST` | `https://cloud.langfuse.com` | Langfuse host (self-hosted or cloud) |
+| `LANGSMITH_TRACING_ENABLED` | `true` | Set to `false` to disable tracing entirely |
+| `LANGSMITH_API_KEY` | — | LangSmith API key |
+| `LANGSMITH_PROJECT` | `default` | LangSmith project name |
+| `LANGSMITH_ENDPOINT` | `https://api.smith.langchain.com` | LangSmith API endpoint (use EU URL for EU accounts) |
 
 ---
 

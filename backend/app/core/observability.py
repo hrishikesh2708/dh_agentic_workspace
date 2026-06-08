@@ -1,36 +1,44 @@
 """Observability module for the application."""
 
-from langfuse import Langfuse
-from langfuse.langchain import CallbackHandler
+import os
+
+from langsmith import Client
 
 from app.core.config import settings
 from app.core.logging import logger
 
 
-def langfuse_init():
-    """Initialize Langfuse."""
-    langfuse = Langfuse(
-        tracing_enabled=settings.LANGFUSE_TRACING_ENABLED,
-        public_key=settings.LANGFUSE_PUBLIC_KEY,
-        secret_key=settings.LANGFUSE_SECRET_KEY,
-        host=settings.LANGFUSE_HOST,
-        environment=settings.ENVIRONMENT.value,
-        debug=settings.DEBUG,
-    )
+def langsmith_init() -> None:
+    """Configure LangSmith tracing via environment variables.
 
-    if langfuse.auth_check():
-        logger.debug("langfuse_auth_success")
-    else:
-        logger.debug("langfuse_auth_failure")
-
-
-def get_langfuse_callback_handler() -> CallbackHandler:
-    """Create a Langfuse CallbackHandler for tracking LLM interactions.
-
-    Returns:
-        CallbackHandler: Configured Langfuse callback handler.
+    When LANGSMITH_TRACING is true, LangChain auto-attaches LangChainTracer
+    to all runnable invocations — no explicit callback handler is required.
     """
-    return CallbackHandler()
+    os.environ["LANGSMITH_TRACING"] = "true" if settings.LANGSMITH_TRACING_ENABLED else "false"
 
+    if settings.LANGSMITH_API_KEY:
+        os.environ["LANGSMITH_API_KEY"] = settings.LANGSMITH_API_KEY
 
-langfuse_callback_handler = get_langfuse_callback_handler()
+    if settings.LANGSMITH_PROJECT:
+        os.environ["LANGSMITH_PROJECT"] = settings.LANGSMITH_PROJECT
+
+    if settings.LANGSMITH_ENDPOINT:
+        os.environ["LANGSMITH_ENDPOINT"] = settings.LANGSMITH_ENDPOINT
+
+    if not settings.LANGSMITH_TRACING_ENABLED:
+        logger.debug("langsmith_tracing_disabled")
+        return
+
+    if not settings.LANGSMITH_API_KEY:
+        logger.debug("langsmith_api_key_missing")
+        return
+
+    try:
+        client = Client(
+            api_key=settings.LANGSMITH_API_KEY,
+            api_url=settings.LANGSMITH_ENDPOINT,
+        )
+        client.list_projects(limit=1)
+        logger.debug("langsmith_auth_success")
+    except Exception as e:
+        logger.debug("langsmith_auth_failure", error=str(e))

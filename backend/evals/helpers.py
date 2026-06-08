@@ -11,10 +11,47 @@ from typing import (
     Tuple,
 )
 
-from langfuse.api.resources.commons.types.trace_with_details import TraceWithDetails
+from langsmith.schemas import Run
 
 from app.core.logging import logger
 from evals.schemas import ScoreSchema
+
+
+def _message_role(message: dict) -> str:
+    """Extract role/type from a LangSmith or LangChain message dict."""
+    return str(message.get("role") or message.get("type") or "unknown")
+
+
+def _message_content(message: dict) -> str:
+    """Extract string content from a message dict."""
+    content = message.get("content")
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text") or block.get("content")
+                if text:
+                    parts.append(str(text))
+            elif block:
+                parts.append(str(block))
+        return " ".join(parts)
+    return str(content)
+
+
+def _extract_messages(data: Any) -> list[dict]:
+    """Extract message list from LangSmith run inputs/outputs."""
+    if not isinstance(data, dict):
+        return []
+
+    messages = data.get("messages")
+    if isinstance(messages, list):
+        return [m for m in messages if isinstance(m, dict)]
+
+    return []
 
 
 def format_messages(messages: list[dict]) -> str:
@@ -28,39 +65,56 @@ def format_messages(messages: list[dict]) -> str:
     """
     formatted_messages = []
     for idx, message in enumerate(messages):
-        if message["type"] == "tool":
-            previous_message = messages[idx - 1]
+        role = _message_role(message)
+        content = _message_content(message)
+
+        if role == "tool" or message.get("type") == "tool":
+            previous_message = messages[idx - 1] if idx > 0 else {}
             tool_call = previous_message.get("additional_kwargs", {}).get("tool_calls", [])
             if tool_call:
                 args = tool_call[0].get("function", {}).get("arguments")
             else:
                 prev_tool_calls = previous_message.get("tool_calls")
                 args = prev_tool_calls[0].get("args") if prev_tool_calls else {}
-            content = message.get("content") or ""
             formatted_messages.append(
-                f"tool {message.get('name')} input: {args} {content[:100]}..."
+                f"tool {message.get('name', 'unknown')} input: {args} {content[:100]}..."
                 if len(content) > 100
-                else f"tool {message.get('name')}: {content}"
+                else f"tool {message.get('name', 'unknown')}: {content}"
             )
-        elif message["content"]:
-            formatted_messages.append(f"{message['type']}: {message['content']}")
+        elif content:
+            formatted_messages.append(f"{role}: {content}")
+
     return "\n".join(formatted_messages)
 
 
-def get_input_output(trace: TraceWithDetails) -> Tuple[Optional[str], Optional[str]]:
-    """Extract and format input and output messages from a trace.
+def get_input_output(run: Run) -> Tuple[Optional[str], Optional[str]]:
+    """Extract and format input and output messages from a LangSmith run.
 
     Args:
-        trace: The trace to extract messages from.
+        run: The LangSmith run to extract messages from.
 
     Returns:
-        Tuple of (formatted_input, formatted_output). None if output is not a dict.
+        Tuple of (formatted_input, formatted_output). None if output is not parseable.
     """
-    if not isinstance(trace.output, dict):
+    input_messages = _extract_messages(run.inputs)
+    output_messages = _extract_messages(run.outputs)
+
+    if output_messages:
+        input_text = format_messages(input_messages) if input_messages else None
+        output_text = format_messages([output_messages[-1]])
+        return input_text or "", output_text
+
+    outputs = run.outputs or {}
+    if isinstance(outputs, dict) and outputs.get("messages"):
         return None, None
-    input_messages = trace.output.get("messages", [])[:-1]
-    output_message = trace.output.get("messages", [])[-1]
-    return format_messages(input_messages), format_messages([output_message])
+
+    if isinstance(outputs, dict):
+        output_content = outputs.get("content") or outputs.get("output")
+        if output_content:
+            input_text = format_messages(input_messages) if input_messages else ""
+            return input_text, str(output_content)
+
+    return None, None
 
 
 def initialize_report(model_name: str) -> Dict[str, Any]:

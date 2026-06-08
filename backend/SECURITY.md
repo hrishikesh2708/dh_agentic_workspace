@@ -24,7 +24,7 @@ You can expect an acknowledgement within 48 hours and a fix or mitigation plan w
 - Rotate all secrets — never use the `.env.example` values
 - Set `DEBUG=false`
 - Restrict `ALLOWED_ORIGINS` to your actual frontend domain
-- Set `LANGFUSE_TRACING_ENABLED=false` if you don't want conversation data sent to Langfuse
+- Set `LANGSMITH_TRACING_ENABLED=false` if you don't want conversation data sent to LangSmith
 - Use environment-specific `.env` files — never commit secrets to git
 
 **What the template does to protect you:**

@@ -1,6 +1,6 @@
 # Evaluation
 
-The template includes a metric-based evaluation framework that fetches traces from Langfuse, scores them with LLM judges, and generates JSON reports.
+The template includes a metric-based evaluation framework that fetches runs from LangSmith, scores them with LLM judges, and generates JSON reports.
 
 ## Running evaluations
 
@@ -15,15 +15,17 @@ make eval ENV=production         # run against production traces
 
 ```mermaid
 flowchart LR
-    Langfuse -->|"fetch recent traces"| Evaluator
+    LangSmith -->|"fetch recent runs"| Evaluator
     Metrics["Metric prompts\nevals/metrics/prompts/*.md"] --> Evaluator
-    Evaluator -->|"LLM judge\nper trace × metric"| Score["pass / fail"]
+    Evaluator -->|"LLM judge\nper run × metric"| Score["pass / fail"]
     Score --> Report["JSON report\nevals/reports/"]
+    Score --> Feedback["LangSmith feedback"]
 ```
 
-1. **Fetch traces** — pulls recent LLM traces from Langfuse (configured via `LANGFUSE_*` env vars)
-2. **Score** — for each trace × metric combination, an LLM judge evaluates the output and returns pass/fail
-3. **Report** — a JSON report with aggregated stats and per-trace results is saved to `evals/reports/`
+1. **Fetch runs** — pulls recent root runs from LangSmith (configured via `LANGSMITH_*` env vars)
+2. **Score** — for each run × metric combination, an LLM judge evaluates the output and returns pass/fail
+3. **Feedback** — scores are pushed back to LangSmith via `create_feedback`
+4. **Report** — a JSON report with aggregated stats and per-trace results is saved to `evals/reports/`
 
 ## Built-in metrics
 

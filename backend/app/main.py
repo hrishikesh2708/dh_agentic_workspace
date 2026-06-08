@@ -29,13 +29,13 @@ from app.core.middleware import (
     MetricsMiddleware,
     ProfilingMiddleware,
 )
-from app.core.observability import langfuse_init
+from app.core.observability import langsmith_init
 from app.services.database import database_service
 from app.services.memory import memory_service
 
 # Load environment variables
 load_dotenv()
-langfuse_init()
+langsmith_init()
 
 
 @asynccontextmanager

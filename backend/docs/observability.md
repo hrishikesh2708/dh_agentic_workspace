@@ -6,7 +6,7 @@
 graph LR
     App["FastAPI App"]
 
-    App -->|"LLM traces\n(every call)"| Langfuse
+    App -->|"LLM traces\n(every call)"| LangSmith
     App -->|"HTTP metrics\n(/metrics)"| Prometheus
     Prometheus --> Grafana
     App -->|"structured logs\n(stdout)"| Logs["Log aggregator\n(or stdout)"]
@@ -15,9 +15,9 @@ graph LR
 
 ---
 
-## Langfuse — LLM tracing
+## LangSmith — LLM tracing
 
-Every LLM call is traced via the LangChain `CallbackHandler`. Traces include:
+Every LLM call is traced automatically when `LANGSMITH_TRACING=true`. LangChain attaches a `LangChainTracer` to all runnable invocations. Traces include:
 
 - Input messages and output
 - Token usage and cost
@@ -27,16 +27,16 @@ Every LLM call is traced via the LangChain `CallbackHandler`. Traces include:
 **Setup:**
 
 ```bash
-LANGFUSE_TRACING_ENABLED=true
-LANGFUSE_PUBLIC_KEY=pk-...
-LANGFUSE_SECRET_KEY=sk-...
-LANGFUSE_HOST=https://cloud.langfuse.com   # or your self-hosted URL
+LANGSMITH_TRACING_ENABLED=true
+LANGSMITH_API_KEY=lsv2_pt_...
+LANGSMITH_PROJECT=default
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com   # EU: https://eu.api.smith.langchain.com
 ```
 
 **Disable for local dev:**
 
 ```bash
-LANGFUSE_TRACING_ENABLED=false
+LANGSMITH_TRACING_ENABLED=false
 ```
 
 Traces are also used as the data source for the [evaluation framework](evaluation.md).
@@ -128,4 +128,4 @@ Every request gets a unique `X-Request-ID` header via [`asgi-correlation-id`](ht
 - Bound to every log line for that request
 - Used as the filename for profile reports
 
-Use the `X-Request-ID` from a response to grep logs, find profiles, and look up Langfuse traces for that exact request.
+Use the `X-Request-ID` from a response to grep logs, find profiles, and look up LangSmith traces for that exact request.

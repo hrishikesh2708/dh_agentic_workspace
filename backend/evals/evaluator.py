@@ -10,8 +10,8 @@ from datetime import (
 from time import sleep
 
 import openai
-from langfuse import Langfuse
-from langfuse.api.resources.commons.types.trace_with_details import TraceWithDetails
+from langsmith import Client
+from langsmith.schemas import Run
 from tqdm import tqdm
 
 # Fix import path for app module
@@ -35,43 +35,43 @@ from evals.schemas import ScoreSchema
 class Evaluator:
     """Evaluates model outputs using predefined metrics.
 
-    This class handles fetching traces from Langfuse, evaluating them against
-    metrics, and uploading scores back to Langfuse.
+    This class handles fetching runs from LangSmith, evaluating them against
+    metrics, and uploading feedback back to LangSmith.
 
     Attributes:
         client: OpenAI client for API calls.
-        langfuse: Langfuse client for trace management.
+        langsmith: LangSmith client for run management.
     """
 
     def __init__(self):
-        """Initialize Evaluator with OpenAI and Langfuse clients."""
+        """Initialize Evaluator with OpenAI and LangSmith clients."""
         self.client = openai.AsyncOpenAI(api_key=settings.EVALUATION_API_KEY, base_url=settings.EVALUATION_BASE_URL)
-        self.langfuse = Langfuse(
-            public_key=settings.LANGFUSE_PUBLIC_KEY,
-            secret_key=settings.LANGFUSE_SECRET_KEY,
-            timeout=60,  # In seconds
+        self.langsmith = Client(
+            api_key=settings.LANGSMITH_API_KEY,
+            api_url=settings.LANGSMITH_ENDPOINT,
         )
+        self._metric_names = {metric["name"] for metric in metrics}
         # Initialize report data structure
         self.report = initialize_report(settings.EVALUATION_LLM)
         initialize_metrics_summary(self.report, metrics)
 
     async def run(self, generate_report_file=True):
-        """Main execution function that fetches and evaluates traces.
+        """Main execution function that fetches and evaluates runs.
 
-        Retrieves traces from Langfuse, evaluates each one against all metrics,
-        and uploads the scores back to Langfuse.
+        Retrieves runs from LangSmith, evaluates each one against all metrics,
+        and uploads feedback back to LangSmith.
 
         Args:
             generate_report_file: Whether to generate a JSON report after evaluation. Defaults to True.
         """
         start_time = time.time()
-        traces = self.__fetch_traces()
-        self.report["total_traces"] = len(traces)
+        runs = self.__fetch_runs()
+        self.report["total_traces"] = len(runs)
 
         trace_results = {}
 
-        for trace in tqdm(traces, desc="Evaluating traces"):
-            trace_id = trace.id
+        for run in tqdm(runs, desc="Evaluating runs"):
+            trace_id = str(run.trace_id or run.id)
             trace_results[trace_id] = {
                 "success": False,
                 "metrics_evaluated": 0,
@@ -79,9 +79,9 @@ class Evaluator:
                 "metrics_results": {},
             }
 
-            for metric in tqdm(metrics, desc=f"Applying metrics to trace {trace_id[:8]}...", leave=False):
+            for metric in tqdm(metrics, desc=f"Applying metrics to run {trace_id[:8]}...", leave=False):
                 metric_name = metric["name"]
-                input, output = get_input_output(trace)
+                input, output = get_input_output(run)
                 if input is None or output is None:
                     update_failure_metrics(self.report, trace_id, metric_name, trace_results)
                     trace_results[trace_id]["metrics_evaluated"] += 1
@@ -89,7 +89,7 @@ class Evaluator:
                 score = await self._run_metric_evaluation(metric, input, output)
 
                 if score:
-                    self._push_to_langfuse(trace, score, metric)
+                    self._push_to_langsmith(run, score, metric)
                     update_success_metrics(self.report, trace_id, metric_name, score, trace_results)
                 else:
                     update_failure_metrics(self.report, trace_id, metric_name, trace_results)
@@ -113,19 +113,20 @@ class Evaluator:
             duration_seconds=self.report["duration_seconds"],
         )
 
-    def _push_to_langfuse(self, trace: TraceWithDetails, score: ScoreSchema, metric: dict):
-        """Push evaluation score to Langfuse.
+    def _push_to_langsmith(self, run: Run, score: ScoreSchema, metric: dict):
+        """Push evaluation feedback to LangSmith.
 
         Args:
-            trace: The trace to score.
+            run: The run to score.
             score: The evaluation score.
             metric: The metric used for evaluation.
         """
-        self.langfuse.create_score(
-            trace_id=trace.id,
-            name=metric["name"],
-            data_type="NUMERIC",
-            value=score.score,
+        trace_id = str(run.trace_id or run.id)
+        self.langsmith.create_feedback(
+            key=metric["name"],
+            score=score.score,
+            run_id=str(run.id),
+            trace_id=trace_id,
             comment=score.reasoning,
         )
 
@@ -200,20 +201,30 @@ class Evaluator:
                 continue
         return None
 
-    def __fetch_traces(self) -> list[TraceWithDetails]:
-        """Fetch traces from the past 24 hours without scores.
+    def _run_has_eval_feedback(self, run: Run) -> bool:
+        """Return True if the run already has feedback for any eval metric."""
+        feedback_stats = run.feedback_stats or {}
+        return any(metric_name in feedback_stats for metric_name in self._metric_names)
+
+    def __fetch_runs(self) -> list[Run]:
+        """Fetch root runs from the past 24 hours without eval feedback.
 
         Returns:
-            List of traces that haven't been scored yet.
+            List of runs that haven't been scored yet.
         """
         last_24_hours = datetime.now() - timedelta(hours=24)
-        logger.info("fetching_langfuse_traces", from_timestamp=str(last_24_hours))
+        logger.info("fetching_langsmith_runs", from_timestamp=str(last_24_hours))
         try:
-            traces = self.langfuse.api.trace.list(
-                from_timestamp=last_24_hours, order_by="timestamp.asc", limit=100
-            ).data
-            traces_without_scores = [trace for trace in traces if not trace.scores]
-            return traces_without_scores
+            runs = list(
+                self.langsmith.list_runs(
+                    project_name=settings.LANGSMITH_PROJECT,
+                    is_root=True,
+                    start_time=last_24_hours,
+                    limit=100,
+                )
+            )
+            runs_without_feedback = [run for run in runs if not self._run_has_eval_feedback(run)]
+            return runs_without_feedback
         except Exception as e:
-            logger.error("langfuse_traces_fetch_failed", error=str(e))
+            logger.error("langsmith_runs_fetch_failed", error=str(e))
             return []
