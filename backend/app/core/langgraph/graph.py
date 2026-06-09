@@ -47,6 +47,7 @@ from app.core.config import (
 from app.core.langgraph.tools import tools
 from app.core.logging import logger
 from app.core.metrics import llm_inference_duration_seconds
+from app.core.observability import langsmith_init
 from app.core.prompts import load_system_prompt
 from app.schemas import (
     GraphState,
@@ -209,6 +210,24 @@ class LangGraphAgent:
 
         return Command(update={"messages": outputs}, goto="chat")
 
+    def _build_state_graph(self) -> StateGraph:
+        """Construct the StateGraph (nodes + edges) without compiling it.
+
+        Extracted so callers that want a graph without a Postgres checkpointer
+        (e.g. ``langgraph dev`` / LangGraph Studio) can compile it themselves.
+        """
+        graph_builder = StateGraph(GraphState)
+        graph_builder.add_node("chat", self._chat, destinations=("tool_call", END))
+        graph_builder.add_node(
+            "tool_call",
+            self._tool_call,
+            destinations=("chat",),
+            retry_policy=RetryPolicy(max_attempts=3),
+        )
+        graph_builder.set_entry_point("chat")
+        graph_builder.set_finish_point("chat")
+        return graph_builder
+
     async def create_graph(self) -> Optional[CompiledStateGraph]:
         """Create and configure the LangGraph workflow.
 
@@ -217,16 +236,7 @@ class LangGraphAgent:
         """
         if self._graph is None:
             try:
-                graph_builder = StateGraph(GraphState)
-                graph_builder.add_node("chat", self._chat, destinations=("tool_call", END))
-                graph_builder.add_node(
-                    "tool_call",
-                    self._tool_call,
-                    destinations=("chat",),
-                    retry_policy=RetryPolicy(max_attempts=3),
-                )
-                graph_builder.set_entry_point("chat")
-                graph_builder.set_finish_point("chat")
+                graph_builder = self._build_state_graph()
 
                 # Get connection pool (may be None in production if DB unavailable)
                 connection_pool = await self._get_connection_pool()
@@ -478,3 +488,28 @@ class LangGraphAgent:
                 error=str(e),
             )
             raise
+
+
+# -----------------------------------------------------------------------------
+# LangGraph Studio / `langgraph dev` entry point
+# -----------------------------------------------------------------------------
+# A module-level singleton so other modules (e.g. CopilotKit middleware mounted
+# in Stage 3) can import a shared graph instance instead of constructing their
+# own.
+agent = LangGraphAgent()
+
+
+async def make_studio_graph() -> CompiledStateGraph:
+    """Build the graph for LangGraph Studio / ``langgraph dev``.
+
+    Returns the compiled graph **without** a Postgres checkpointer — the dev
+    CLI provides an in-memory checkpointer automatically. Also primes
+    LangSmith tracing so Studio runs appear in the configured project.
+
+    Referenced by ``backend/langgraph.json``.
+    """
+    langsmith_init()
+    graph_builder = agent._build_state_graph()
+    return graph_builder.compile(
+        name=f"{settings.PROJECT_NAME} Agent (studio)",
+    )

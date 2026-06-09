@@ -1,0 +1,164 @@
+destination_type: google_dm
+label: Google Data Manager
+description: Send conversions to Google
+enabled: true
+version: "1.0"
+fields:
+  - name: transactionId
+    type: string
+    required: false
+    description: "Google transactionId. Canonical: event.general.event_id. Transform: convert_to_str."
+    enum_values: []
+    constraints: {}
+  - name: eventTimestamp
+    type: datetime
+    required: false
+    description: "Google eventTimestamp. Canonical: event.general.event_time. Transform: convert_to_google_format."
+    enum_values: []
+    constraints: {}
+  - name: userData.emailAddress
+    type: string
+    required: false
+    description: "Google userData emailAddress, hashed. Canonical: user.pii.email_hashed."
+    enum_values: []
+    constraints:
+      hash: sha256
+  - name: userData.phoneNumber
+    type: string
+    required: false
+    description: "Google userData phoneNumber, hashed. Canonical: user.pii.phone_hashed."
+    enum_values: []
+    constraints:
+      hash: sha256
+  - name: userData.address.givenName
+    type: string
+    required: false
+    description: "Google userData given name. Canonical: user.pii.first_name."
+    enum_values: []
+    constraints: {}
+  - name: userData.address.familyName
+    type: string
+    required: false
+    description: "Google userData family name. Canonical: user.pii.last_name."
+    enum_values: []
+    constraints: {}
+  - name: userData.address.postalCode
+    type: string
+    required: false
+    description: "Google userData postal code. Canonical: user.pii.zipcode. Transform: convert_to_str."
+    enum_values: []
+    constraints: {}
+  - name: userData.address.regionCode
+    type: string
+    required: false
+    description: "Google userData region/country code. Canonical: user.pii.country. Transform: convert_to_uppercase."
+    enum_values: []
+    constraints: {}
+  - name: consent.adUserData
+    type: string
+    required: false
+    description: "Google consent ad user data. Canonical: measurement_consent."
+    enum_values: []
+    constraints: {}
+  - name: consent.adPersonalization
+    type: string
+    required: false
+    description: "Google consent ad personalization. Canonical: personalization_consent."
+    enum_values: []
+    constraints: {}
+  - name: adIdentifiers.sessionAttributes
+    type: string
+    required: false
+    description: "Google adIdentifiers session attributes. Canonical: user.pii.session_attributes."
+    enum_values: []
+    constraints: {}
+  - name: adIdentifiers.gclid
+    type: string
+    required: false
+    description: "Google click ID (gclid). Canonical: user.general.gclid. Transform: convert_to_str."
+    enum_values: []
+    constraints: {}
+  - name: adIdentifiers.gbraid
+    type: string
+    required: false
+    description: "Google gbraid. Canonical: user.general.gbraid. Transform: convert_to_str."
+    enum_values: []
+    constraints: {}
+  - name: adIdentifiers.wbraid
+    type: string
+    required: false
+    description: "Google wbraid. Canonical: user.general.wbraid. Transform: convert_to_str."
+    enum_values: []
+    constraints: {}
+  - name: adIdentifiers.landingPageDeviceInfo.userAgent
+    type: string
+    required: false
+    description: "Google landing page user agent. Canonical: user.general.client_user_agent."
+    enum_values: []
+    constraints: {}
+  - name: adIdentifiers.landingPageDeviceInfo.ipAddress
+    type: string
+    required: false
+    description: "Google landing page IP address. Canonical: user.general.client_ip_address."
+    enum_values: []
+    constraints: {}
+  - name: currency
+    type: string
+    required: false
+    description: "Google currency (ISO 4217). Canonical: event.monetary.currency."
+    enum_values: [USD, INR, EUR, GBP]
+    constraints: {}
+  - name: conversionValue
+    type: number
+    required: false
+    description: "Google conversion value. Canonical: event.general.content_value. Transform: convert_to_float."
+    enum_values: []
+    constraints: {}
+  - name: eventDeviceInfo.userAgent
+    type: string
+    required: false
+    description: "Google event device user agent. Canonical: user.general.client_user_agent."
+    enum_values: []
+    constraints: {}
+  - name: eventDeviceInfo.ipAddress
+    type: string
+    required: false
+    description: "Google event device IP address. Canonical: user.general.client_ip_address."
+    enum_values: []
+    constraints: {}
+  - name: cartData.merchantFeedLabel
+    type: string
+    required: false
+    description: "Google cartData merchant feed label. Canonical: user.pii.merchant_feed_label."
+    enum_values: []
+    constraints: {}
+  - name: cartData.merchantFeedLanguageCode
+    type: string
+    required: false
+    description: "Google cartData merchant feed language code. Canonical: user.pii.merchant_feed_language_code."
+    enum_values: []
+    constraints: {}
+  - name: cartData.transactionDiscount
+    type: string
+    required: false
+    description: "Google cartData transaction discount. Canonical: user.pii.transaction_discount."
+    enum_values: []
+    constraints: {}
+  - name: cartData.items.merchantProductId
+    type: string
+    required: false
+    description: "Google cart line item product id. Canonical: event.general.contents.id."
+    enum_values: []
+    constraints: {}
+  - name: cartData.items.quantity
+    type: number
+    required: false
+    description: "Google cart line item quantity. Canonical: event.general.contents.quantity."
+    enum_values: []
+    constraints: {}
+  - name: cartData.items.unitPrice
+    type: number
+    required: false
+    description: "Google cart line item unit price. Canonical: event.general.contents.price."
+    enum_values: []
+    constraints: {}

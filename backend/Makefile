@@ -93,6 +93,14 @@ migrate-history:
 	@$(call run_with_env,uv run alembic history --verbose)
 
 # ---------------------------------------------------------------------------
+# LangGraph Studio (local dev)
+# ---------------------------------------------------------------------------
+STUDIO_PORT ?= 2024
+
+studio:
+	@$(call run_with_env,uv run langgraph dev --port $(STUDIO_PORT))
+
+# ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
 eval:
@@ -185,6 +193,9 @@ help:
 	@echo "  migrate-downgrade    Rollback last migration"
 	@echo "  migrate-history      Show migration history"
 	@echo ""
+	@echo "LangGraph Studio:"
+	@echo "  studio               Start LangGraph dev server + Studio (port \$$STUDIO_PORT, default 2024)"
+	@echo ""
 	@echo "Evaluation:"
 	@echo "  eval                 Run evals (interactive)"
 	@echo "  eval-quick           Run evals (default settings)"
@@ -214,6 +225,7 @@ help:
 
 .PHONY: install dev staging prod _serve \
         migrate migration migrate-downgrade migrate-history \
+        studio \
         eval eval-quick eval-no-report \
         lint format typecheck check pre-commit pre-commit-update \
         docker-build docker-up docker-down docker-logs \

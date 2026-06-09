@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "datahash_agent": "./app/agents/__init__.py:build_studio_graph"
+  },
+  "env": ".env.development",
+  "python_version": "3.13"
+}

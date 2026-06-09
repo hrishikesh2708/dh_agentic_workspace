@@ -212,6 +212,38 @@ class Settings:
             if value:
                 self.RATE_LIMIT_ENDPOINTS[endpoint] = value
 
+        # ---------------------------------------------------------------
+        # Mapping Agent Configuration (Stage 1)
+        # ---------------------------------------------------------------
+        # LLM + embedding models the mapper uses (separate from chat LLMs)
+        self.MAPPING_LLM_MODEL = os.getenv("MAPPING_LLM_MODEL", "gpt-4o")
+        self.MAPPING_EMBEDDER_MODEL = os.getenv("MAPPING_EMBEDDER_MODEL", "text-embedding-3-small")
+
+        # Confidence-gating thresholds (auto-approve / review / unmatched)
+        self.AUTO_APPROVE_THRESHOLD = float(os.getenv("AUTO_APPROVE_THRESHOLD", "0.90"))
+        self.REVIEW_THRESHOLD = float(os.getenv("REVIEW_THRESHOLD", "0.50"))
+
+        # Feedback learning
+        self.GOLDEN_RULE_MIN_OCCURRENCES = int(os.getenv("GOLDEN_RULE_MIN_OCCURRENCES", "3"))
+        self.MAPPER_TOP_K_EXAMPLES = int(os.getenv("MAPPER_TOP_K_EXAMPLES", "5"))
+
+        # Schema registry paths (relative to backend/app/agents/shared_tools/)
+        self.DESTINATION_SCHEMA_DIR = os.getenv("DESTINATION_SCHEMA_DIR", "schemas/destinations")
+        self.INTERNAL_SCHEMA_DIR = os.getenv("INTERNAL_SCHEMA_DIR", "schemas/internal")
+        self.INTERNAL_SCHEMA_NAME = os.getenv("INTERNAL_SCHEMA_NAME", "canonical")
+
+        # Salesforce integration (username-password OAuth)
+        self.SALESFORCE_CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID", "")
+        self.SALESFORCE_CLIENT_SECRET = os.getenv("SALESFORCE_CLIENT_SECRET", "")
+        self.SALESFORCE_USERNAME = os.getenv("SALESFORCE_USERNAME", "")
+        self.SALESFORCE_PASSWORD = os.getenv("SALESFORCE_PASSWORD", "")
+        self.SALESFORCE_SECURITY_TOKEN = os.getenv("SALESFORCE_SECURITY_TOKEN", "")
+        self.SALESFORCE_AUTH_URL = os.getenv("SALESFORCE_AUTH_URL", "https://login.salesforce.com")
+        self.SALESFORCE_STANDARD_OBJECTS = os.getenv(
+            "SALESFORCE_STANDARD_OBJECTS",
+            "Lead,Contact,Account,Opportunity,Case,Campaign,Task,Event,CampaignMember,Order,Product2,Quote",
+        )
+
         # Evaluation Configuration
         self.EVALUATION_LLM = os.getenv("EVALUATION_LLM", "gpt-5")
         self.EVALUATION_BASE_URL = os.getenv("EVALUATION_BASE_URL", "https://api.openai.com/v1")

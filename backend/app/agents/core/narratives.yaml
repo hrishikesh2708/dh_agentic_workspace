@@ -1,0 +1,33 @@
+# Agent-visible narrative templates. Placeholders: {source_label}, {dest_label}, {object}, {canonical_label}
+
+intent:
+  requirements:
+    in_progress: "Gathering all requirements for this request…"
+  source:
+    in_progress: "Gathering source…"
+    confirmed: "Source: {source_label}"
+  object:
+    in_progress: "Gathering object…"
+    confirmed: "Object: {object} from {source_label}"
+  destination:
+    in_progress: "Gathering destination…"
+    confirmed: "Destination: {dest_label}"
+  complete:
+    subtitle: "Setup complete"
+    message: "Ready to map {object} from {source_label} to {dest_label}."
+
+canonical:
+  bridge:
+    in_progress: "Before mapping to {dest_label}, I'll map {object} from {source_label} to the Datahash canonical structure."
+  map:
+    in_progress: "Mapping {object} from {source_label} to {canonical_label}…"
+    confirmed: "Canonical mapping done."
+  cancelled: "Canonical mapping was cancelled."
+
+projection:
+  setup:
+    in_progress: "Now mapping to {dest_label}…"
+  map:
+    in_progress: "Building field mappings to {dest_label}…"
+    confirmed: "Projection mapping to {dest_label} is ready."
+  cancelled: "Projection mapping was cancelled."

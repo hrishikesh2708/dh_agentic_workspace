@@ -102,6 +102,22 @@ def process_llm_response(response: BaseMessage) -> BaseMessage:
     return response
 
 
+def _normalize_messages(items: list) -> list[Message]:
+    """Convert trimmed LangChain messages back to app Message models."""
+    normalized: list[Message] = []
+    for item in items:
+        if isinstance(item, Message):
+            normalized.append(item)
+        elif isinstance(item, dict):
+            normalized.append(Message(**item))
+        elif isinstance(item, BaseMessage):
+            role = item.type
+            if role not in ("user", "assistant", "system"):
+                role = "assistant"
+            normalized.append(Message(role=role, content=extract_text_content(item.content)))
+    return normalized
+
+
 def prepare_messages(messages: list[Message], system_prompt: str) -> list[Message]:
     """Prepare the messages for the LLM.
 
@@ -135,4 +151,4 @@ def prepare_messages(messages: list[Message], system_prompt: str) -> list[Messag
         else:
             raise
 
-    return [Message(role="system", content=system_prompt)] + trimmed_messages
+    return [Message(role="system", content=system_prompt)] + _normalize_messages(trimmed_messages)
