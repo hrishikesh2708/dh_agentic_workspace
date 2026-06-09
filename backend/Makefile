@@ -50,8 +50,35 @@ _serve:
 # ---------------------------------------------------------------------------
 # Database migrations
 # ---------------------------------------------------------------------------
+DOCKER_DB_HOST_PORT ?= 5432
+
+_migrate_in_docker:
+	$(call load_env_file)
+	@APP_ENV=$(ENV) $(DOCKER_COMPOSE) --env-file .env.$(ENV) exec -T \
+		-e POSTGRES_HOST=db -e POSTGRES_PORT=5432 \
+		app uv run alembic upgrade head
+
+_migrate_on_host:
+	$(call load_env_file)
+	@bash -c '\
+		source scripts/set_env.sh $(ENV) && \
+		HOST_PORT=$$($(DOCKER_COMPOSE) --env-file .env.$(ENV) port db 5432 2>/dev/null | cut -d: -f2); \
+		HOST_PORT=$${HOST_PORT:-$(DOCKER_DB_HOST_PORT)}; \
+		echo "Running migrations on localhost:$$HOST_PORT" && \
+		POSTGRES_HOST=localhost POSTGRES_PORT=$$HOST_PORT uv run alembic upgrade head'
+
 migrate:
-	@$(call run_with_env,uv run alembic upgrade head)
+	$(call load_env_file)
+	@if APP_ENV=$(ENV) $(DOCKER_COMPOSE) --env-file .env.$(ENV) ps db --status running -q 2>/dev/null | grep -q .; then \
+		echo "Docker db detected — running migrations from host (localhost + published port)"; \
+		$(MAKE) _migrate_on_host ENV=$(ENV); \
+	elif APP_ENV=$(ENV) $(DOCKER_COMPOSE) --env-file .env.$(ENV) ps app --status running -q 2>/dev/null | grep -q .; then \
+		echo "Docker app detected — running migrations inside container (db:5432)"; \
+		$(MAKE) _migrate_in_docker ENV=$(ENV); \
+	else \
+		echo "Running migrations from host using .env settings"; \
+		$(MAKE) _migrate_on_host ENV=$(ENV); \
+	fi
 
 migration:
 	@if [ -z "$(MSG)" ]; then \
