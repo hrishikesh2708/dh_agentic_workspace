@@ -34,6 +34,7 @@ from app.agents.core.messages import (
     narrative_message,
     projection_narrative_event,
 )
+from app.core.metrics import hitl_interruptions_total
 from app.agents.core.narratives import CANONICAL_LABEL
 from app.agents.orchestrator.state import GlobalAgentState
 from app.agents.workers.learning_worker.tools import (
@@ -93,6 +94,7 @@ async def _review(state: GlobalAgentState) -> dict[str, Any]:
         destination_fields=destination_field_options(state),
         mapping_summary=build_mapping_summary(full_mappings),
     )
+    hitl_interruptions_total.labels(interrupt_type="mapping_review").inc()
     response: Any = interrupt(payload)
 
     updated_dicts = apply_review_response(full_mappings, response)

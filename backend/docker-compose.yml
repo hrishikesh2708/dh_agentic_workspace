@@ -66,6 +66,26 @@ services:
     networks:
       - monitoring
 
+  # Next.js dashboard frontend (Stage 5/6).
+  # Backend URL is set so the frontend talks to ``app:8000`` inside the
+  # compose network and the host's ``http://localhost:8000`` from a browser.
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3000"   # host 3001 → container 3000 (3000 is taken by Grafana)
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - BACKEND_URL=http://app:8000
+      - NODE_ENV=production
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - monitoring
+    restart: on-failure
+
   # Prometheus
   prometheus:
     image: prom/prometheus:latest

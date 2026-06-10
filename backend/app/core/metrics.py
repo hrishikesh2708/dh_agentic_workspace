@@ -40,6 +40,26 @@ session_names_generated_total = Counter(
     ["status"],  # "success" | "error"
 )
 
+# --- Mapping agent metrics (Stage 7) -----------------------------------------
+
+mapping_runs_total = Counter(
+    "mapping_runs_total",
+    "Total mapping runs completed (one increment per persist)",
+    ["mapping_kind"],  # "canonical" | "projection"
+)
+
+hitl_interruptions_total = Counter(
+    "hitl_interruptions_total",
+    "Total HITL interrupts emitted by the supervisor",
+    ["interrupt_type"],  # "select_source" | "select_object" | "select_destination" | "mapping_review"
+)
+
+golden_rule_hits_total = Counter(
+    "golden_rule_hits_total",
+    "Total golden-rule upserts (new + occurrence_count increments)",
+    ["operation"],  # "create" | "increment"
+)
+
 
 def setup_metrics(app):
     """Set up Prometheus metrics middleware and endpoints.

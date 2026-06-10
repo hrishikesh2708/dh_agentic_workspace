@@ -4,152 +4,35 @@ Ported from three crawler_agent files:
 
 - ``src/persistence/sessions.py``       → :func:`persist_session`,
    :func:`apply_review_response`
-- ``src/persistence/models.py``         → :class:`Customer`,
-   :class:`MappingSession`, :class:`FieldMapping`, :class:`MappingEmbedding`,
-   :class:`GoldenRule` (inlined here as a TEMPORARY measure; see
-   ``TODO(stage-2)`` below)
 - ``src/pipeline/feedback_learner.py``  → :class:`FeedbackLearningAgent`
 
-# TODO(stage-2): move ORM models to ``app/models/mapping/`` and wire them
-# into the existing :class:`app.models.base.BaseModel` declarative base.
-# Inlining them here keeps Stage 1 self-contained — once Stage 2 lands the
-# Alembic migrations + the proper model package, delete the model
-# definitions in this file and import them from ``app.models.mapping``.
+ORM models live in :mod:`app.models.mapping` (Stage 2).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
-from sqlalchemy import (
-    JSON,
-    DateTime,
-    Float,
-    ForeignKey,
-    Integer,
-    String,
-    Text,
-    func,
-    select,
-)
-
-try:
-    from pgvector.sqlalchemy import Vector as _PgVector  # type: ignore[import-not-found]
-
-    _VectorColumnType: Any = _PgVector(1536)
-except ImportError:
-    # pgvector isn't installed in the backend env yet (Stage 2 will add it).
-    # The actual embedding writes go through raw SQL in
-    # :mod:`app.agents.shared_tools.vector_store`, so the column type here
-    # is unused at runtime. JSON keeps the ORM happy.
-    _VectorColumnType = JSON
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
 )
-from sqlalchemy.orm import (
-    DeclarativeBase,
-    Mapped,
-    mapped_column,
-    relationship,
-)
+from sqlmodel import col
 
 from app.agents.core.agent_config import _AgentSettingsProxy
 from app.agents.shared_tools.openai_client import OpenAIService
 from app.agents.shared_tools.vector_store import VectorStoreService
+from app.core.metrics import (
+    golden_rule_hits_total,
+    mapping_runs_total,
+)
+from app.models.mapping import (
+    FieldMapping,
+    GoldenRule,
+    MappingSession,
+)
 from app.schemas.agent.types import MappingStatus
-
-
-# -----------------------------------------------------------------------------
-# Inlined ORM models — TODO(stage-2): move to app/models/mapping/
-# -----------------------------------------------------------------------------
-
-
-class Base(DeclarativeBase):
-    """Local declarative base for the mapping-agent ORM models.
-
-    Kept separate from :class:`app.models.base.BaseModel` until Stage 2
-    consolidates the schemas. The async engine in
-    :mod:`app.agents.core.deps` is the one that binds to this metadata.
-    """
-
-
-class Customer(Base):
-    """Customer / tenant row (one row per organisation)."""
-
-    __tablename__ = "customers"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    salesforce_org_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    sessions: Mapped[list["MappingSession"]] = relationship(back_populates="customer")
-
-
-class MappingSession(Base):
-    """One mapping run (canonical or projection) per row."""
-
-    __tablename__ = "mapping_sessions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
-    source: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_object: Mapped[str] = mapped_column(String(255), nullable=False)
-    destination_type: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[str] = mapped_column(String(64), default="pending")
-    mapping_kind: Mapped[str] = mapped_column(String(32), default="canonical")
-    canonical_session_id: Mapped[int | None] = mapped_column(ForeignKey("mapping_sessions.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    customer: Mapped["Customer"] = relationship(back_populates="sessions")
-    mappings: Mapped[list["FieldMapping"]] = relationship(back_populates="session")
-
-
-class FieldMapping(Base):
-    """One source-field → destination-field row, scoped to a mapping session."""
-
-    __tablename__ = "field_mappings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("mapping_sessions.id"), nullable=False)
-    source_field: Mapped[str] = mapped_column(String(255), nullable=False)
-    destination_field: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    confidence: Mapped[float] = mapped_column(Float, default=0.0)
-    status: Mapped[str] = mapped_column(String(64), default="needs_review")
-    reasoning: Mapped[str] = mapped_column(Text, default="")
-    transformation: Mapped[str | None] = mapped_column(Text, nullable=True)
-    validation_status: Mapped[str] = mapped_column(String(32), default="pass")
-    validation_notes: Mapped[dict] = mapped_column(JSON, default=list)
-
-    session: Mapped["MappingSession"] = relationship(back_populates="mappings")
-    embedding: Mapped["MappingEmbedding"] = relationship(back_populates="field_mapping", uselist=False)
-
-
-class MappingEmbedding(Base):
-    """pgvector embedding for an approved field mapping (used by the mapper retrieval step)."""
-
-    __tablename__ = "mapping_embeddings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    field_mapping_id: Mapped[int] = mapped_column(ForeignKey("field_mappings.id"), nullable=False, unique=True)
-    embedding: Mapped[list[float]] = mapped_column(_VectorColumnType)
-    metadata_json: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
-
-    field_mapping: Mapped["FieldMapping"] = relationship(back_populates="embedding")
-
-
-class GoldenRule(Base):
-    """High-confidence learned rule: a source pattern that maps to a destination field."""
-
-    __tablename__ = "golden_rules"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    source_pattern: Mapped[str] = mapped_column(String(255), nullable=False)
-    destination_field: Mapped[str] = mapped_column(String(255), nullable=False)
-    destination_type: Mapped[str] = mapped_column(String(255), nullable=False)
-    occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
 
 
 # -----------------------------------------------------------------------------
@@ -199,8 +82,7 @@ async def persist_session(state, session_maker, kind: str) -> dict[str, Any]:
     """Persist a finished mapping run + its field mappings to Postgres.
 
     Args:
-        state: The current :class:`GlobalAgentState`. Read by attribute
-            access (was ``state.get(...)`` against the old TypedDict).
+        state: The current :class:`GlobalAgentState`.
         session_maker: An async sessionmaker (from :mod:`app.agents.core.deps`).
         kind: Either ``"canonical"`` or ``"projection"``; controls the
             ``destination_type`` recorded and whether
@@ -212,11 +94,6 @@ async def persist_session(state, session_maker, kind: str) -> dict[str, Any]:
     """
     async with session_maker() as db:
         customer_id = state.customer_id or 1
-        customer = (await db.execute(select(Customer).where(Customer.id == customer_id))).scalar_one_or_none()
-        if not customer:
-            customer = Customer(id=customer_id, name="Default", salesforce_org_id="default")
-            db.add(customer)
-            await db.flush()
 
         dest_type = state.destination_type or ""
         if kind == "canonical":
@@ -238,6 +115,7 @@ async def persist_session(state, session_maker, kind: str) -> dict[str, Any]:
         for m in state.mappings or []:
             if not _has_destination(m):
                 continue
+            assert ms.id is not None  # noqa: S101 — set by flush()
             db.add(
                 FieldMapping(
                     session_id=ms.id,
@@ -258,6 +136,7 @@ async def persist_session(state, session_maker, kind: str) -> dict[str, Any]:
 
         await db.commit()
 
+    mapping_runs_total.labels(mapping_kind=kind).inc()
     result: dict[str, Any] = {"session_id": ms.id}
     if kind == "canonical":
         result["canonical_session_id"] = ms.id
@@ -270,13 +149,7 @@ async def persist_session(state, session_maker, kind: str) -> dict[str, Any]:
 
 
 class FeedbackLearningAgent:
-    """Stores embeddings + golden rules for human-approved/corrected mappings.
-
-    Verbatim port of ``src/pipeline/feedback_learner.py``. The original
-    spun up its own async engine; we now accept an injected
-    :class:`async_sessionmaker` so :mod:`app.agents.core.deps` owns the
-    engine lifecycle.
-    """
+    """Stores embeddings + golden rules for human-approved/corrected mappings."""
 
     def __init__(
         self,
@@ -302,12 +175,13 @@ class FeedbackLearningAgent:
                     continue
 
                 statement = select(FieldMapping).where(
-                    FieldMapping.session_id == state.session_id,
-                    FieldMapping.source_field == mapping.source_field,
+                    col(FieldMapping.session_id) == state.session_id,
+                    col(FieldMapping.source_field) == mapping.source_field,
                 )
                 db_mapping = (await session.execute(statement)).scalar_one_or_none()
                 if not db_mapping:
                     continue
+                assert db_mapping.id is not None  # noqa: S101
 
                 emb_input = f"{mapping.source_field}::{mapping.destination_field or ''}"
                 embedding = (await self.openai_service.embed_texts([emb_input]))[0]
@@ -339,13 +213,14 @@ class FeedbackLearningAgent:
         destination_type: str,
     ) -> None:
         statement = select(GoldenRule).where(
-            GoldenRule.source_pattern == source_pattern,
-            GoldenRule.destination_field == destination_field,
-            GoldenRule.destination_type == destination_type,
+            col(GoldenRule.source_pattern) == source_pattern,
+            col(GoldenRule.destination_field) == destination_field,
+            col(GoldenRule.destination_type) == destination_type,
         )
         rule = (await session.execute(statement)).scalar_one_or_none()
         if rule:
             rule.occurrence_count += 1
+            golden_rule_hits_total.labels(operation="increment").inc()
             return
         session.add(
             GoldenRule(
@@ -355,3 +230,4 @@ class FeedbackLearningAgent:
                 occurrence_count=1,
             )
         )
+        golden_rule_hits_total.labels(operation="create").inc()

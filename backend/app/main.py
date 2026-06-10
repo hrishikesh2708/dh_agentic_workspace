@@ -62,6 +62,37 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("graph_pre_warm_failed", error=str(e))
 
+    # Build the mapping agent's supervisor graph + wrap as CopilotKit SDK
+    # so /api/v1/copilotkit serves the AG-UI protocol.
+    try:
+        from copilotkit import (
+            CopilotKitRemoteEndpoint,
+            LangGraphAGUIAgent,
+        )
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        from app.agents import build_app_graph
+
+        conn_pool = await agent._get_connection_pool()
+        if conn_pool:
+            checkpointer = AsyncPostgresSaver(conn_pool)
+            await checkpointer.setup()
+        else:
+            checkpointer = None
+
+        mapping_graph = build_app_graph(checkpointer)
+        ck_agent = LangGraphAGUIAgent(name="datahash_agent", graph=mapping_graph)
+        # LangGraphAGUIAgent extends LangGraphAgent (ag_ui_langgraph), not
+        # the CopilotKit Agent base — runtime accepts it but type stub doesn't.
+        app.state.copilotkit_sdk = CopilotKitRemoteEndpoint(agents=[ck_agent])  # pyright: ignore[reportArgumentType]
+        logger.info(
+            "copilotkit_sdk_initialized",
+            agent_name="datahash_agent",
+            has_checkpointer=checkpointer is not None,
+        )
+    except Exception as e:
+        logger.exception("copilotkit_sdk_init_failed", error=str(e))
+
     # Pre-warm mem0 AsyncMemory: initializes pgvector connection and schema check
     # so the first search() cache miss or add() doesn't pay the ~130ms cold-init cost
     try:

@@ -38,6 +38,7 @@ from app.agents.core.constants import (
     SOURCE_OPTIONS,
     source_label,
 )
+from app.core.metrics import hitl_interruptions_total
 from app.agents.core.intent_validation import (
     canonicalize_object_name,
     compute_run_mode,
@@ -292,6 +293,7 @@ async def gather_source(state: GlobalAgentState) -> dict[str, Any]:
     if is_valid_source(source):
         return {}
 
+    hitl_interruptions_total.labels(interrupt_type="select_source").inc()
     response: Any = interrupt(build_select_source_interrupt())
     fallback = first_enabled_source_id()
     selected = _resume_selected(response, fallback=fallback)
@@ -315,6 +317,7 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
     requested = normalize_optional_str(state.source_object)
 
     if source.lower() not in _SUPPORTED_OBJECT_SOURCES:
+        hitl_interruptions_total.labels(interrupt_type="select_source").inc()
         response: Any = interrupt(build_unsupported_source_interrupt(source=source))
         selected_source = _resume_selected(response, fallback=first_enabled_source_id())
         if not is_valid_source(selected_source):
@@ -353,6 +356,7 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
             result["messages"] = messages
         return result
 
+    hitl_interruptions_total.labels(interrupt_type="select_object").inc()
     response = interrupt(
         build_select_object_interrupt(
             source=source,
@@ -412,6 +416,7 @@ async def gather_destination(state: GlobalAgentState) -> dict[str, Any]:
             "messages": finish,
         }
 
+    hitl_interruptions_total.labels(interrupt_type="select_destination").inc()
     response: Any = interrupt(
         build_select_destination_interrupt(
             options=destination_options,
