@@ -100,6 +100,18 @@ STUDIO_PORT ?= 2024
 studio:
 	@$(call run_with_env,uv run langgraph dev --port $(STUDIO_PORT))
 
+studio-down:
+	@PIDS="$$(lsof -ti :$(STUDIO_PORT) 2>/dev/null)"; \
+	if [ -n "$$PIDS" ]; then \
+		echo "Stopping LangGraph Studio on port $(STUDIO_PORT) (PIDs: $$PIDS)"; \
+		kill -9 $$PIDS 2>/dev/null || true; \
+	else \
+		echo "No process listening on port $(STUDIO_PORT)."; \
+	fi
+	@pkill -9 -f "langgraph dev" 2>/dev/null || true
+	@rm -rf .langgraph_api
+	@echo "Studio stopped and .langgraph_api/ cleaned."
+
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
@@ -195,6 +207,7 @@ help:
 	@echo ""
 	@echo "LangGraph Studio:"
 	@echo "  studio               Start LangGraph dev server + Studio (port \$$STUDIO_PORT, default 2024)"
+	@echo "  studio-down          Stop the Studio server and clean .langgraph_api/"
 	@echo ""
 	@echo "Evaluation:"
 	@echo "  eval                 Run evals (interactive)"
@@ -225,7 +238,7 @@ help:
 
 .PHONY: install dev staging prod _serve \
         migrate migration migrate-downgrade migrate-history \
-        studio \
+        studio studio-down \
         eval eval-quick eval-no-report \
         lint format typecheck check pre-commit pre-commit-update \
         docker-build docker-up docker-down docker-logs \
