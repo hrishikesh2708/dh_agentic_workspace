@@ -15,7 +15,7 @@ from sqlmodel import (
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.mapping.field_mapping import FieldMapping
+    from app.models.field_mapping import FieldMapping
 
 
 class MappingSession(BaseModel, table=True):

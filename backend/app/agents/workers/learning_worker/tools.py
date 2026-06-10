@@ -6,7 +6,7 @@ Ported from three crawler_agent files:
    :func:`apply_review_response`
 - ``src/pipeline/feedback_learner.py``  → :class:`FeedbackLearningAgent`
 
-ORM models live in :mod:`app.models.mapping` (Stage 2).
+ORM models live in :mod:`app.models`.
 """
 
 from __future__ import annotations
@@ -27,11 +27,9 @@ from app.core.metrics import (
     golden_rule_hits_total,
     mapping_runs_total,
 )
-from app.models.mapping import (
-    FieldMapping,
-    GoldenRule,
-    MappingSession,
-)
+from app.models.field_mapping import FieldMapping
+from app.models.golden_rule import GoldenRule
+from app.models.mapping_session import MappingSession
 from app.schemas.agent.types import MappingStatus
 
 

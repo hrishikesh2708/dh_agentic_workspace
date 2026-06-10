@@ -11,10 +11,10 @@ from sqlmodel import SQLModel
 
 from alembic import context
 from app.core.config import settings
-from app.models.mapping.field_mapping import FieldMapping  # noqa: F401
-from app.models.mapping.golden_rule import GoldenRule  # noqa: F401
-from app.models.mapping.mapping_embedding import MappingEmbedding  # noqa: F401
-from app.models.mapping.mapping_session import MappingSession  # noqa: F401
+from app.models.field_mapping import FieldMapping  # noqa: F401
+from app.models.golden_rule import GoldenRule  # noqa: F401
+from app.models.mapping_embedding import MappingEmbedding  # noqa: F401
+from app.models.mapping_session import MappingSession  # noqa: F401
 from app.models.session import Session  # noqa: F401
 from app.models.thread import Thread  # noqa: F401
 from app.models.user import User  # noqa: F401

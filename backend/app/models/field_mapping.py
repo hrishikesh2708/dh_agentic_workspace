@@ -16,8 +16,8 @@ from sqlmodel import (
 from app.models.base import BaseModel
 
 if TYPE_CHECKING:
-    from app.models.mapping.mapping_embedding import MappingEmbedding
-    from app.models.mapping.mapping_session import MappingSession
+    from app.models.mapping_embedding import MappingEmbedding
+    from app.models.mapping_session import MappingSession
 
 
 class FieldMapping(BaseModel, table=True):

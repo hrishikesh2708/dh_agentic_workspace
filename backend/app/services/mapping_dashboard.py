@@ -22,9 +22,9 @@ from sqlmodel import (
 
 from app.agents.core.deps import session_maker
 from app.core.logging import logger
-from app.models.mapping.field_mapping import FieldMapping
-from app.models.mapping.golden_rule import GoldenRule
-from app.models.mapping.mapping_session import MappingSession
+from app.models.field_mapping import FieldMapping
+from app.models.golden_rule import GoldenRule
+from app.models.mapping_session import MappingSession
 
 
 async def list_user_mappings(
