@@ -55,6 +55,7 @@ class GlobalAgentState(BaseModel):
 
     # --- Session + bookkeeping ---
     customer_id: int | None = None
+    username: str = ""
     session_id: int | None = None
     canonical_session_id: int | None = None
     has_pending_review: bool = False

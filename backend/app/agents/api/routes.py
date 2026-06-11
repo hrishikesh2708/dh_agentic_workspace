@@ -131,8 +131,24 @@ async def _handle_info(langgraph_agent) -> JSONResponse:
     )
 
 
-async def _handle_agent_run(request: Request, langgraph_agent, body: dict[str, Any], *, path: str):
-    run_body = _extract_run_payload(body, path=path)
+def _inject_session_context(run_body: dict[str, Any], session: Session) -> dict[str, Any]:
+    """Merge authenticated user identity into the AG-UI state payload."""
+    state = dict(run_body.get("state") or {})
+    state.setdefault("customer_id", session.user_id)
+    if session.username and not state.get("username"):
+        state["username"] = session.username
+    return {**run_body, "state": state}
+
+
+async def _handle_agent_run(
+    request: Request,
+    langgraph_agent,
+    body: dict[str, Any],
+    *,
+    path: str,
+    session: Session,
+):
+    run_body = _inject_session_context(_extract_run_payload(body, path=path), session)
     try:
         input_data = RunAgentInput.model_validate(run_body)
     except Exception as exc:
@@ -203,7 +219,7 @@ async def copilotkit_endpoint(
         or (body.get("threadId") is not None and body.get("messages") is not None)
         or _AGENT_PATH_RE.match(path)
     ):
-        return await _handle_agent_run(request, langgraph_agent, body, path=path)
+        return await _handle_agent_run(request, langgraph_agent, body, path=path, session=session)
 
     # Lazy import — avoid pulling the heavy copilotkit module on every cold start.
     from copilotkit.integrations.fastapi import handler as copilotkit_handler

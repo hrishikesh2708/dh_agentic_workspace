@@ -187,7 +187,10 @@ export function ChatShell() {
   return (
     <ProjectProvider initialProject={activeProject}>
       <ChatProviders sessionToken={stored.access_token}>
-        <HeadlessChat projectName={activeProject.name} />
+        <HeadlessChat
+          projectName={activeProject.name}
+          sessionId={stored.session_id}
+        />
       </ChatProviders>
     </ProjectProvider>
   );

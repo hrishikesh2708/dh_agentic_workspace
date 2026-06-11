@@ -1,0 +1,3 @@
+this is example of message
+- Hi {display_name}, what signals would you want to send, and where? Describe it in your own words.
+- you can rephrase it

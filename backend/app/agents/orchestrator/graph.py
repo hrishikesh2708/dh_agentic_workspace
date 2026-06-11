@@ -1,4 +1,4 @@
-"""Supervisor graph — sequences the 5 worker sub-graphs.
+"""Supervisor graph — sequences the 6 worker sub-graphs.
 
 The supervisor is a thin sequencer (no LLM routing in v1). Same worker is
 invoked twice in projection runs: once with ``mapping_kind=canonical``
@@ -36,6 +36,8 @@ from app.agents.workers.learning_worker.graph import build as build_learning
 from app.agents.workers.mapper_worker.graph import build as build_mapper
 from app.agents.workers.reviewer_worker.graph import build as build_reviewer
 from app.agents.workers.schema_worker.graph import build as build_schema
+from app.agents.workers.welcome_worker.graph import build as build_welcome
+from app.agents.workers.welcome_worker.tools import route_after_welcome
 
 
 def _build_supervisor() -> StateGraph:
@@ -46,6 +48,7 @@ def _build_supervisor() -> StateGraph:
     """
     # Build each worker once — same compiled sub-graph is reused under
     # canonical and projection node names.
+    welcome_g = build_welcome()
     intent_g = build_intent()
     schema_g = build_schema()
     mapper_g = build_mapper()
@@ -53,6 +56,9 @@ def _build_supervisor() -> StateGraph:
     learning_g = build_learning()
 
     g = StateGraph(GlobalAgentState)
+
+    # --- Phase 0: welcome (on chat connect) ---
+    g.add_node("welcome", welcome_g)
 
     # --- Phase 1: intent ---
     g.add_node("intent", intent_g)
@@ -74,7 +80,15 @@ def _build_supervisor() -> StateGraph:
     g.add_node("done_summary", done_summary_node)
 
     # --- Edges ---
-    g.add_edge(START, "intent")
+    g.add_edge(START, "welcome")
+    g.add_conditional_edges(
+        "welcome",
+        route_after_welcome,
+        {
+            "intent": "intent",
+            END: END,
+        },
+    )
     g.add_edge("intent", "schema_canonical")
     g.add_edge("schema_canonical", "mapper_canonical")
     g.add_edge("mapper_canonical", "reviewer_canonical")

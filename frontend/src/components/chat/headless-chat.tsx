@@ -10,19 +10,39 @@ import { useHeadlessInterrupt } from "@/hooks/use-headless-interrupt";
 import { CHAT_AGENT_ID } from "@/lib/chat-constants";
 import { extractMessageText } from "@/lib/parse-agent-message";
 import { useAgent, useCopilotKit } from "@copilotkit/react-core/v2";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function HeadlessChat({
   projectName: projectNameProp,
+  sessionId,
 }: {
   projectName?: string;
-} = {}) {
+  sessionId: string;
+}) {
   const { project } = useProject();
   const projectName = projectNameProp?.trim() || project.name?.trim() || "";
   const { copilotkit } = useCopilotKit();
-  const { agent } = useAgent({ agentId: CHAT_AGENT_ID });
+  const { agent } = useAgent({ agentId: CHAT_AGENT_ID, threadId: sessionId });
+  const connectedSessionRef = useRef<string | null>(null);
   const { pending, resolve } = useHeadlessInterrupt();
   const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    if (!sessionId || connectedSessionRef.current === sessionId) return;
+
+    let cancelled = false;
+    connectedSessionRef.current = sessionId;
+
+    void copilotkit.connectAgent({ agent }).catch((error: unknown) => {
+      if (cancelled) return;
+      connectedSessionRef.current = null;
+      console.error("HeadlessChat: connectAgent failed", error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [agent, copilotkit, sessionId]);
 
   const sendMessage = useCallback(
     (text: string) => {
@@ -70,11 +90,6 @@ export function HeadlessChat({
       }
     >
       <ChatErrorBoundary mode="inline" projectName={projectName}>
-        {agent.messages.length === 0 && (
-          <p className="text-sm text-[var(--muted-foreground)]">
-            Try: &quot;Map my Salesforce leads to Meta ads.&quot;
-          </p>
-        )}
         {agent.messages.map((message, index) => {
           const priorAssistant = agent.messages
             .slice(0, index)
