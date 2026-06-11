@@ -78,6 +78,24 @@ export interface GoldenRuleCreate {
   occurrence_count?: number;
 }
 
+export interface ProjectRead {
+  id: string;
+  name: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectCreate {
+  name: string;
+  description?: string | null;
+}
+
+export interface ProjectListResponse {
+  items: ProjectRead[];
+  total: number;
+}
+
 export interface GoldenRuleListResponse {
   items: GoldenRuleRead[];
   total: number;

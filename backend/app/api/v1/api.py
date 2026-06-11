@@ -10,6 +10,7 @@ from app.agents.api.routes import router as copilotkit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.chatbot import router as chatbot_router
 from app.api.v1.dashboard import router as dashboard_router
+from app.api.v1.projects import router as projects_router
 from app.core.logging import logger
 
 api_router = APIRouter()
@@ -19,6 +20,7 @@ api_router.include_router(auth_router, prefix="/auth", tags=["auth"])
 api_router.include_router(chatbot_router, prefix="/chatbot", tags=["chatbot"])
 api_router.include_router(copilotkit_router, prefix="/copilotkit", tags=["agent"])
 api_router.include_router(dashboard_router, tags=["dashboard"])
+api_router.include_router(projects_router, prefix="/projects", tags=["projects"])
 
 
 @api_router.get("/health")

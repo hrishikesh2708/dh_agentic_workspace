@@ -206,6 +206,7 @@ class Settings:
             "mappings_detail": ["60 per minute"],
             "golden_rules": ["60 per minute"],
             "integrations": ["30 per minute"],
+            "projects": ["60 per minute"],
         }
 
         # Update rate limit endpoints from environment variables

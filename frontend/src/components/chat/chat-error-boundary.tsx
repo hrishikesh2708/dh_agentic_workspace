@@ -6,6 +6,9 @@ import { CopilotChatLayout, CopilotOfflineBanner } from "./copilot-chat-layout";
 
 interface Props {
   children: ReactNode;
+  projectName?: string;
+  /** When "inline", only replace the message area — header keeps projectName. */
+  mode?: "full" | "inline";
   fallbackMessage?: string;
 }
 
@@ -26,15 +29,24 @@ export class ChatErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      const message =
+        this.props.fallbackMessage ??
+        `Agent connection failed (${this.state.error.message}).`;
+
+      if (this.props.mode === "inline") {
+        return (
+          <CopilotOfflineBanner
+            message={`${message} The chat header and project context stay available.`}
+          />
+        );
+      }
+
       return (
         <CopilotChatLayout
+          projectName={this.props.projectName}
           inputDisabled
           inputPlaceholder="Agent unavailable — connect backend to chat"
-          banner={
-            <CopilotOfflineBanner
-              message={`Agent connection failed (${this.state.error.message}). The UI shell is shown so you can keep building the chat experience.`}
-            />
-          }
+          banner={<CopilotOfflineBanner message={message} />}
         />
       );
     }

@@ -1,31 +1,47 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 interface DialogProps {
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
+  /** When false, backdrop click and Escape do not close the dialog. */
+  dismissible?: boolean;
   children: React.ReactNode;
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({
+  open,
+  onOpenChange,
+  dismissible = true,
+  children,
+}: DialogProps) {
   React.useEffect(() => {
-    if (!open) return;
+    if (!open || !dismissible || !onOpenChange) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onOpenChange(false);
+      if (e.key === "Escape") onOpenChange?.(false);
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onOpenChange]);
+  }, [open, onOpenChange, dismissible]);
 
-  if (!open) return null;
+  const [mounted, setMounted] = React.useState(false);
 
-  return (
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!open || !mounted) return null;
+
+  return createPortal(
     <div
       role="presentation"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={() => onOpenChange(false)}
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 p-4"
+      onClick={() => {
+        if (dismissible) onOpenChange?.(false);
+      }}
     >
       <div
         role="dialog"
@@ -35,7 +51,8 @@ export function Dialog({ open, onOpenChange, children }: DialogProps) {
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

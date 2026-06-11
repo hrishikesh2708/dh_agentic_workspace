@@ -1,14 +1,17 @@
 "use client";
 
 import { ChatProviders } from "@/app/(app)/chat/providers";
-import { ChatErrorBoundary } from "@/components/chat/chat-error-boundary";
 import {
   CopilotChatLayout,
   CopilotOfflineBanner,
 } from "@/components/chat/copilot-chat-layout";
 import { HeadlessChat } from "@/components/chat/headless-chat";
+import { ProjectPickerDialog } from "@/components/chat/project-picker-dialog";
+import { ProjectProvider } from "@/components/chat/project-context";
 import { Spinner } from "@/components/ui/spinner";
 import { apiClient, ApiError } from "@/lib/api-client";
+import { loadStoredProject, storeProject } from "@/lib/project-storage";
+import type { ProjectRead } from "@/lib/types";
 import { useEffect, useState } from "react";
 
 /** Shape returned by ``POST /api/v1/auth/session`` (see backend ``app/schemas/auth.py``). */
@@ -68,6 +71,28 @@ function ChatPreviewShell({ message }: { message?: string }) {
   );
 }
 
+function ProjectGateShell({
+  onComplete,
+}: {
+  onComplete: (project: ProjectRead) => void;
+}) {
+  return (
+    <>
+      <CopilotChatLayout
+        inputDisabled
+        inputPlaceholder="Select a project to start chatting"
+        banner={
+          <p className="text-sm text-[var(--muted-foreground)]">
+            Choose or create a project workspace before Copilot can load your
+            connections and mappings.
+          </p>
+        }
+      />
+      <ProjectPickerDialog open onComplete={onComplete} />
+    </>
+  );
+}
+
 /**
  * Bootstraps a chat session token, then mounts the CopilotKit-backed
  * HeadlessChat. Falls back to the visible UI shell when the session or
@@ -75,6 +100,7 @@ function ChatPreviewShell({ message }: { message?: string }) {
  */
 export function ChatShell() {
   const [stored, setStored] = useState<StoredChatSession | null>(null);
+  const [activeProject, setActiveProject] = useState<ProjectRead | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,6 +113,7 @@ export function ChatShell() {
         if (existing) {
           if (!cancelled) {
             setStored(existing);
+            setActiveProject(loadStoredProject());
             setLoading(false);
           }
           return;
@@ -103,6 +130,7 @@ export function ChatShell() {
         storeSession(next);
         if (!cancelled) {
           setStored(next);
+          setActiveProject(loadStoredProject());
           setLoading(false);
         }
       } catch (err) {
@@ -145,11 +173,22 @@ export function ChatShell() {
     );
   }
 
+  if (!activeProject) {
+    return (
+      <ProjectGateShell
+        onComplete={(project) => {
+          storeProject(project);
+          setActiveProject(project);
+        }}
+      />
+    );
+  }
+
   return (
-    <ChatErrorBoundary>
+    <ProjectProvider initialProject={activeProject}>
       <ChatProviders sessionToken={stored.access_token}>
-        <HeadlessChat />
+        <HeadlessChat projectName={activeProject.name} />
       </ChatProviders>
-    </ChatErrorBoundary>
+    </ProjectProvider>
   );
 }

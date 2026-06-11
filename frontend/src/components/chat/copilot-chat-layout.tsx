@@ -2,7 +2,6 @@
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { MOCK_PROJECT_NAME } from "@/lib/mock-workspace";
 import { cn } from "@/lib/utils";
 
 export function CopilotChatLayout({
@@ -12,6 +11,7 @@ export function CopilotChatLayout({
   onSubmit,
   inputDisabled = false,
   inputPlaceholder = "Message Signals Copilot…",
+  projectName,
   banner,
   footerExtra,
 }: {
@@ -21,6 +21,7 @@ export function CopilotChatLayout({
   onSubmit?: (e: React.FormEvent) => void;
   inputDisabled?: boolean;
   inputPlaceholder?: string;
+  projectName?: string;
   banner?: React.ReactNode;
   footerExtra?: React.ReactNode;
 }) {
@@ -28,7 +29,7 @@ export function CopilotChatLayout({
     <div className="flex h-full min-h-0 flex-col bg-[var(--background)]">
       <header className="shrink-0 border-b border-[var(--border)]">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4 px-6 py-4">
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-semibold text-[var(--accent-foreground)]">
               ●
             </span>
@@ -41,9 +42,17 @@ export function CopilotChatLayout({
               </p>
             </div>
           </div>
-          <p className="shrink-0 text-sm text-[var(--muted-foreground)]">
-            Project: {MOCK_PROJECT_NAME}
-          </p>
+          {projectName ? (
+            <div className="ml-auto shrink-0 text-right">
+              <p className="text-xs text-[var(--muted-foreground)]">Project</p>
+              <p
+                className="max-w-[12rem] truncate text-sm font-medium text-[var(--foreground)] sm:max-w-[16rem]"
+                title={projectName}
+              >
+                {projectName}
+              </p>
+            </div>
+          ) : null}
         </div>
       </header>
 
