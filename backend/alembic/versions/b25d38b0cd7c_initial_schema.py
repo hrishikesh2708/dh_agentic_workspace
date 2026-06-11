@@ -115,9 +115,408 @@ def upgrade() -> None:
     op.create_index(op.f("ix_golden_rule_source_pattern"), "golden_rule", ["source_pattern"])
     op.create_index(op.f("ix_golden_rule_destination_type"), "golden_rule", ["destination_type"])
 
+    op.create_table(
+        "canonical_field",
+        sa.Column("canonical_key", sa.Text(), nullable=False),
+        sa.Column("field_label", sa.Text(), nullable=False),
+        sa.Column("field_hint", sa.Text(), nullable=True),
+        sa.Column("field_category", sa.Text(), nullable=False),
+        sa.Column("is_pii", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.PrimaryKeyConstraint("canonical_key"),
+    )
+
+    op.create_table(
+        "destination_field_mapping",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("destination_slug", sa.Text(), nullable=False),
+        sa.Column("sub_destination_slug", sa.Text(), nullable=False),
+        sa.Column("destination_field_path", sa.Text(), nullable=False),
+        sa.Column("canonical_key", sa.Text(), nullable=False),
+        sa.Column("transform_function", sa.Text(), nullable=True),
+        sa.Column("is_required", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("is_destination_specific", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.ForeignKeyConstraint(["canonical_key"], ["canonical_field.canonical_key"]),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "destination_slug",
+            "sub_destination_slug",
+            "destination_field_path",
+        ),
+    )
+    op.create_index(
+        op.f("ix_destination_field_mapping_canonical_key"),
+        "destination_field_mapping",
+        ["canonical_key"],
+    )
+
+    op.create_table(
+        "connector",
+        sa.Column("connector_slug", sa.Text(), nullable=False),
+        sa.Column("connector_type", sa.Text(), nullable=False),
+        sa.Column("display_name", sa.Text(), nullable=False),
+        sa.Column("auth_scheme", sa.Text(), nullable=False),
+        sa.Column("sub_connector_of", sa.Text(), nullable=True),
+        sa.Column("status", sa.Text(), nullable=False, server_default="disabled"),
+        sa.PrimaryKeyConstraint("connector_slug"),
+    )
+
+    op.create_foreign_key(
+        "fk_connector_parent",
+        "connector",
+        "connector",
+        ["sub_connector_of"],
+        ["connector_slug"],
+        ondelete="SET NULL",
+    )
+
+    op.create_table(
+        "project",
+        sa.Column(
+            "id",
+            sa.UUID(),
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+    )
+
+    op.execute(
+        """
+        CREATE OR REPLACE FUNCTION update_updated_at()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            NEW.updated_at = now();
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        """
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_project_updated_at
+        BEFORE UPDATE ON project
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+        """
+    )
+
+    op.create_table(
+        "project_connection",
+        sa.Column(
+            "id",
+            sa.UUID(),
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column("project_id", sa.UUID(), nullable=False),
+        sa.Column("connector_slug", sa.Text(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False, server_default="active"),
+        sa.Column("metadata", sa.JSON(), nullable=True),
+        sa.Column(
+            "connected_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column("connected_by", sa.Text(), nullable=True),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(["project_id"], ["project.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["connector_slug"],
+            ["connector.connector_slug"],
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint("project_id", "connector_slug", name="uq_project_connector"),
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_project_connection_updated_at
+        BEFORE UPDATE ON project_connection
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+        """
+    )
+
+    op.create_index("ix_project_connection_project_id", "project_connection", ["project_id"])
+
+    op.create_table(
+        "project_connection_secret",
+        sa.Column(
+            "id",
+            sa.UUID(),
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column("project_connection_id", sa.UUID(), nullable=False),
+        sa.Column("secret_key", sa.Text(), nullable=False),
+        sa.Column("secret_value", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["project_connection_id"],
+            ["project_connection.id"],
+            ondelete="CASCADE",
+        ),
+        sa.UniqueConstraint(
+            "project_connection_id",
+            "secret_key",
+            name="uq_connection_secret_key",
+        ),
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_project_connection_secret_updated_at
+        BEFORE UPDATE ON project_connection_secret
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+        """
+    )
+
+    op.create_index(
+        "ix_project_connection_secret_conn_id",
+        "project_connection_secret",
+        ["project_connection_id"],
+    )
+
+    op.create_table(
+        "project_source_module",
+        sa.Column(
+            "id",
+            sa.UUID(),
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column("project_connection_id", sa.UUID(), nullable=False),
+        sa.Column("module_type", sa.Text(), nullable=False),
+        sa.Column("module_identifier", sa.Text(), nullable=False),
+        sa.Column("display_name", sa.Text(), nullable=True),
+        sa.Column("status", sa.Text(), nullable=False, server_default="draft"),
+        sa.Column("schema_snapshot", sa.JSON(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["project_connection_id"],
+            ["project_connection.id"],
+            ondelete="CASCADE",
+        ),
+        sa.UniqueConstraint(
+            "project_connection_id",
+            "module_identifier",
+            name="uq_source_module",
+        ),
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_project_source_module_updated_at
+        BEFORE UPDATE ON project_source_module
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+        """
+    )
+
+    op.create_index(
+        "ix_project_source_module_conn_id",
+        "project_source_module",
+        ["project_connection_id"],
+    )
+
+    op.create_table(
+        "project_field_mapping",
+        sa.Column(
+            "id",
+            sa.UUID(),
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column("source_module_id", sa.UUID(), nullable=False),
+        sa.Column("canonical_key", sa.Text(), nullable=False),
+        sa.Column("source_field_path", sa.Text(), nullable=True),
+        sa.Column("is_constant", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("constant_value", sa.Text(), nullable=True),
+        sa.Column("confidence", sa.Text(), nullable=True),
+        sa.Column("confirmed_by", sa.Text(), nullable=True),
+        sa.Column("confirmed_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["source_module_id"],
+            ["project_source_module.id"],
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["canonical_key"],
+            ["canonical_field.canonical_key"],
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint(
+            "source_module_id",
+            "canonical_key",
+            name="uq_module_canonical_key",
+        ),
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_project_field_mapping_updated_at
+        BEFORE UPDATE ON project_field_mapping
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+        """
+    )
+
+    op.create_index(
+        "ix_project_field_mapping_module_id",
+        "project_field_mapping",
+        ["source_module_id"],
+    )
+
+    op.create_table(
+        "project_integration",
+        sa.Column(
+            "id",
+            sa.UUID(),
+            nullable=False,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
+        sa.Column("source_module_id", sa.UUID(), nullable=False),
+        sa.Column("destination_conn_id", sa.UUID(), nullable=False),
+        sa.Column("sub_destination_slug", sa.Text(), nullable=False),
+        sa.Column("status", sa.Text(), nullable=False, server_default="draft"),
+        sa.Column("created_via", sa.Text(), nullable=False, server_default="copilot"),
+        sa.Column("activated_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("activated_by", sa.Text(), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["source_module_id"],
+            ["project_source_module.id"],
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["destination_conn_id"],
+            ["project_connection.id"],
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["sub_destination_slug"],
+            ["connector.connector_slug"],
+            ondelete="RESTRICT",
+        ),
+        sa.UniqueConstraint(
+            "source_module_id",
+            "destination_conn_id",
+            "sub_destination_slug",
+            name="uq_integration",
+        ),
+    )
+
+    op.execute(
+        """
+        CREATE TRIGGER trg_project_integration_updated_at
+        BEFORE UPDATE ON project_integration
+        FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+        """
+    )
+
+    op.create_index(
+        "ix_project_integration_module_id",
+        "project_integration",
+        ["source_module_id"],
+    )
+
+    op.create_index(
+        "ix_project_integration_dest_conn_id",
+        "project_integration",
+        ["destination_conn_id"],
+    )
+
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.execute("DROP TRIGGER IF EXISTS trg_project_integration_updated_at ON project_integration")
+    op.execute("DROP TRIGGER IF EXISTS trg_project_field_mapping_updated_at ON project_field_mapping")
+    op.execute("DROP TRIGGER IF EXISTS trg_project_source_module_updated_at ON project_source_module")
+    op.execute("DROP TRIGGER IF EXISTS trg_project_connection_secret_updated_at ON project_connection_secret")
+    op.execute("DROP TRIGGER IF EXISTS trg_project_connection_updated_at ON project_connection")
+    op.execute("DROP TRIGGER IF EXISTS trg_project_updated_at ON project")
+    op.drop_table("project_integration")
+    op.drop_table("project_field_mapping")
+    op.drop_table("project_source_module")
+    op.drop_table("project_connection_secret")
+    op.drop_table("project_connection")
+    op.drop_table("project")
+    op.execute("DROP FUNCTION IF EXISTS update_updated_at")
+    op.drop_constraint("fk_connector_parent", "connector", type_="foreignkey")
+    op.drop_table("connector")
+    op.drop_index(
+        op.f("ix_destination_field_mapping_canonical_key"),
+        table_name="destination_field_mapping",
+    )
+    op.drop_table("destination_field_mapping")
+    op.drop_table("canonical_field")
     op.drop_index(op.f("ix_golden_rule_destination_type"), table_name="golden_rule")
     op.drop_index(op.f("ix_golden_rule_source_pattern"), table_name="golden_rule")
     op.drop_table("golden_rule")
