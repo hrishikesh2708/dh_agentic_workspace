@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 
+import { parseApiErrorBody } from "@/lib/api-errors";
 import type { User } from "@/lib/types";
 
 interface AuthContextValue {
@@ -63,10 +64,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         credentials: "include",
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as {
-          detail?: string;
-        };
-        throw new Error(body.detail ?? "login_failed");
+        const body = await res.json().catch(() => null);
+        const { message } = parseApiErrorBody(body, "login_failed");
+        throw new Error(message);
       }
       await refresh();
     },

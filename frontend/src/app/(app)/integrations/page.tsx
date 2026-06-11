@@ -1,94 +1,98 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-import { apiClient } from "@/lib/api-client";
-import type { SalesforceStatus } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Spinner } from "@/components/ui/spinner";
+import { MOCK_CONNECTORS } from "@/lib/mock-workspace";
+
+const AVAILABLE_INTEGRATIONS = [
+  {
+    id: "salesforce",
+    name: "Salesforce",
+    description:
+      "OAuth2 connection used to pull Leads, Contacts, and custom objects.",
+  },
+  {
+    id: "meta",
+    name: "Meta",
+    description: "Conversions API destination for ad platform event matching.",
+  },
+  {
+    id: "zoho",
+    name: "Zoho",
+    description: "CRM source for leads and contact synchronization.",
+  },
+  {
+    id: "tiktok",
+    name: "TikTok",
+    description: "Events API destination for TikTok ad optimization.",
+  },
+];
 
 export default function IntegrationsPage() {
-  const [status, setStatus] = useState<SalesforceStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const data = await apiClient.get<SalesforceStatus>(
-          "/integrations/salesforce/status",
-        );
-        if (!cancelled) setStatus(data);
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "load_failed");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const connectedIds = new Set(
+    MOCK_CONNECTORS.filter((c) => c.authenticated).map((c) => c.id),
+  );
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Integrations</h1>
         <p className="text-sm text-[var(--muted-foreground)]">
-          Connect upstream data sources to feed the mapping agent.
+          Connectors authenticated for this workspace.
         </p>
       </div>
 
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between">
-          <div>
-            <CardTitle>Salesforce</CardTitle>
-            <CardDescription>
-              OAuth2 connection used to pull Leads, Contacts, and custom
-              objects.
-            </CardDescription>
+      <div className="grid gap-4 md:grid-cols-2">
+        {AVAILABLE_INTEGRATIONS.map((integration) => {
+          const connected = connectedIds.has(integration.id);
+          return (
+            <Card key={integration.id}>
+              <CardHeader className="flex flex-row items-start justify-between">
+                <div>
+                  <CardTitle>{integration.name}</CardTitle>
+                  <CardDescription>{integration.description}</CardDescription>
+                </div>
+                {connected ? (
+                  <Badge variant="success">Connected</Badge>
+                ) : (
+                  <Badge variant="outline">Not connected</Badge>
+                )}
+              </CardHeader>
+              <CardFooter className="justify-end">
+                <Button variant={connected ? "outline" : "default"} disabled>
+                  {connected ? "Manage" : "Connect"}
+                </Button>
+              </CardFooter>
+            </Card>
+          );
+        })}
+      </div>
+
+      {MOCK_CONNECTORS.filter((c) => c.authenticated).length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Authenticated connectors</h2>
+          <div className="flex flex-wrap gap-2">
+            {MOCK_CONNECTORS.filter((c) => c.authenticated).map((connector) => (
+              <div
+                key={connector.id}
+                className="flex items-center gap-2 rounded-[var(--radius)] border border-[var(--border)] px-3 py-2 text-sm"
+              >
+                <span className="flex h-7 w-7 items-center justify-center rounded border border-[var(--border)] text-xs font-semibold">
+                  {connector.icon}
+                </span>
+                {connector.name}
+              </div>
+            ))}
           </div>
-          {loading ? (
-            <Spinner size="sm" />
-          ) : status?.connected ? (
-            <Badge variant="success">Connected</Badge>
-          ) : (
-            <Badge variant="outline">Not connected</Badge>
-          )}
-        </CardHeader>
-        <CardContent>
-          {error ? (
-            <div className="rounded-[var(--radius)] border border-[var(--destructive)] bg-[var(--destructive)]/10 px-3 py-2 text-sm text-[var(--destructive)]">
-              {error}
-            </div>
-          ) : null}
-        </CardContent>
-        <CardFooter className="justify-end">
-          <Button
-            disabled={loading || !status?.auth_url}
-            onClick={() => {
-              if (status?.auth_url) {
-                window.location.href = status.auth_url;
-              }
-            }}
-          >
-            {status?.connected ? "Reconnect" : "Connect"}
-          </Button>
-        </CardFooter>
-      </Card>
+        </section>
+      )}
     </div>
   );
 }

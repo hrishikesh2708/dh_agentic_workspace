@@ -1,3 +1,4 @@
+import { parseApiErrorBody } from "./api-errors";
 import { JWT_PUB_COOKIE, readCookieFromDocument } from "./auth";
 
 const BACKEND_URL =
@@ -96,10 +97,7 @@ export async function apiFetch<T = unknown>(
   }
 
   if (!res.ok) {
-    const message =
-      (parsed && typeof parsed === "object" && "detail" in parsed
-        ? String((parsed as { detail: unknown }).detail)
-        : null) ?? `request_failed_${res.status}`;
+    const { message } = parseApiErrorBody(parsed, `request_failed_${res.status}`);
     throw new ApiError(message, res.status, parsed);
   }
 

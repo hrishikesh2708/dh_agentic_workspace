@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuth } from "@/hooks/use-auth";
+import { parseApiErrorBody } from "@/lib/api-errors";
 
 export function LoginForm() {
   const router = useRouter();
@@ -35,9 +36,13 @@ export function LoginForm() {
     try {
       await login(email, password);
       const next = params.get("next");
-      router.push(next && next.startsWith("/") ? next : "/dashboard");
+      router.push(next && next.startsWith("/") ? next : "/chat");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "login_failed");
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError(parseApiErrorBody(null, "login_failed").message);
+      }
     } finally {
       setSubmitting(false);
     }

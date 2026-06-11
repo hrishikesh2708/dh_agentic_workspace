@@ -4,6 +4,8 @@ import "@copilotkit/react-core/v2/styles.css";
 
 import { CopilotKit } from "@copilotkit/react-core/v2";
 
+import { CHAT_AGENT_ID } from "@/lib/chat-constants";
+
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -25,7 +27,7 @@ export function ChatProviders({
   return (
     <CopilotKit
       runtimeUrl={`${BACKEND_URL}/api/v1/copilotkit`}
-      agent="datahash_agent"
+      agent={CHAT_AGENT_ID}
       useSingleEndpoint
       enableInspector={false}
       headers={{ Authorization: `Bearer ${sessionToken}` }}

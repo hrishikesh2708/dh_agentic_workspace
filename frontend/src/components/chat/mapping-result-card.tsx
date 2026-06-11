@@ -33,7 +33,7 @@ export function MappingResultCard({ data }: { data: MappingCompleteMessage }) {
       : `${data.source_object} → Canonical`;
 
   return (
-    <Card className="border-emerald-500/40 bg-emerald-500/5 w-full max-w-2xl">
+    <Card className="w-full border-emerald-500/40 bg-emerald-500/5">
       <CardContent className="p-4 space-y-4">
         <div>
           <p className="text-sm font-semibold text-[var(--foreground)]">{data.summary}</p>

@@ -5,6 +5,7 @@ const JWT_COOKIE = "datahash_jwt";
 
 const PROTECTED_PREFIXES = [
   "/dashboard",
+  "/future-dashboard",
   "/mappings",
   "/runs",
   "/golden-rules",
@@ -37,6 +38,7 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/dashboard/:path*",
+    "/future-dashboard/:path*",
     "/mappings/:path*",
     "/runs/:path*",
     "/golden-rules/:path*",

@@ -20,6 +20,7 @@ from app.core.config import (
     settings,
 )
 from app.core.logging import logger
+import app.models.registry  # noqa: F401 — register all SQLModel mappers
 from app.models.session import Session as ChatSession
 from app.models.user import User
 

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { decodeJwt } from "jose";
 
+import { parseApiErrorBody } from "@/lib/api-errors";
+
 const BACKEND_URL =
   process.env.BACKEND_URL ??
   process.env.NEXT_PUBLIC_BACKEND_URL ??
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   const form = new URLSearchParams();
-  form.set("username", email);
+  form.set("email", email);
   form.set("password", password);
   form.set("grant_type", "password");
 
@@ -65,11 +67,11 @@ export async function POST(request: Request) {
   }
 
   if (!backendRes.ok) {
-    const detail =
-      parsed && typeof parsed === "object" && "detail" in parsed
-        ? String((parsed as { detail: unknown }).detail)
-        : "login_failed";
-    return NextResponse.json({ detail }, { status: backendRes.status });
+    const { message, fieldErrors } = parseApiErrorBody(parsed, "login_failed");
+    return NextResponse.json(
+      { detail: message, errors: fieldErrors },
+      { status: backendRes.status },
+    );
   }
 
   const token = parsed as BackendTokenResponse;

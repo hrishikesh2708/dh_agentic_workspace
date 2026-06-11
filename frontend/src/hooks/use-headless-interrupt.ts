@@ -1,5 +1,6 @@
 "use client";
 
+import { CHAT_AGENT_ID } from "@/lib/chat-constants";
 import { normalizeInterruptPayload } from "@/lib/normalize-interrupt-payload";
 import { useAgent, useCopilotKit } from "@copilotkit/react-core/v2";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -71,7 +72,7 @@ export type InterruptEvent = {
 
 export function useHeadlessInterrupt() {
   const { copilotkit } = useCopilotKit();
-  const { agent } = useAgent();
+  const { agent } = useAgent({ agentId: CHAT_AGENT_ID });
   const [pending, setPending] = useState<InterruptEvent | null>(null);
   const stagedRef = useRef<InterruptEvent | null>(null);
   const rawInterruptRef = useRef<unknown>(null);

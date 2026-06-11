@@ -5,7 +5,7 @@ import { useTheme } from "@/hooks/use-theme";
 
 const ORDER = ["light", "dark", "system"] as const;
 
-export function ThemeToggle() {
+export function ThemeToggle({ compact = false }: { compact?: boolean }) {
   const { theme, setTheme } = useTheme();
 
   function cycle() {
@@ -14,9 +14,18 @@ export function ThemeToggle() {
     setTheme(next);
   }
 
+  const label = theme === "light" ? "Light" : theme === "dark" ? "Dark" : "System";
+
   return (
-    <Button variant="ghost" size="sm" onClick={cycle} aria-label="Toggle theme">
-      {theme === "light" ? "Light" : theme === "dark" ? "Dark" : "System"}
+    <Button
+      variant="ghost"
+      size={compact ? "icon" : "sm"}
+      onClick={cycle}
+      aria-label={`Theme: ${label}`}
+      title={compact ? `Theme: ${label}` : undefined}
+      className={compact ? "h-8 w-8" : undefined}
+    >
+      {compact ? (theme === "light" ? "☀" : theme === "dark" ? "☾" : "◐") : label}
     </Button>
   );
 }
