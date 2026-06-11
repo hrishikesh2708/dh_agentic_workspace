@@ -101,10 +101,10 @@ export function HeadlessChat({
             </div>
           );
         })}
-        {agent.isRunning && !pending && (
+        {agent.isRunning && (
           <div className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
             <Spinner size="sm" />
-            Agent is thinking…
+            {pending ? "Applying your selection…" : "Agent is thinking…"}
           </div>
         )}
       </ChatErrorBoundary>

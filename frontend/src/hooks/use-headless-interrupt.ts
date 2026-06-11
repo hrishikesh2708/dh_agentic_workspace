@@ -99,9 +99,13 @@ export function useHeadlessInterrupt() {
           stagedRef.current = null;
         }
       },
-      onRunFailed: () => {
+      onRunFailed: ({ error }) => {
         stagedRef.current = null;
         rawInterruptRef.current = null;
+        console.error("Agent run failed after interrupt:", error);
+      },
+      onRunErrorEvent: ({ event }) => {
+        console.error("Agent run error:", event.message);
       },
     });
     return () => sub.unsubscribe();
@@ -127,7 +131,9 @@ export function useHeadlessInterrupt() {
             },
           },
         })
-        .catch(() => {});
+        .catch((error) => {
+          console.error("Failed to resume agent after HITL:", error);
+        });
     },
     [agent, copilotkit, pending],
   );

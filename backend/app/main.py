@@ -82,6 +82,9 @@ async def lifespan(app: FastAPI):
 
         mapping_graph = build_app_graph(checkpointer)
         ck_agent = LangGraphAGUIAgent(name="datahash_agent", graph=mapping_graph)
+        # LangGraphAGUIAgent uses AG-UI streaming (``.run()``), not the legacy
+        # CopilotKit ``execute()`` path — keep a direct reference for the router.
+        app.state.langgraph_agent = ck_agent
         # LangGraphAGUIAgent extends LangGraphAgent (ag_ui_langgraph), not
         # the CopilotKit Agent base — runtime accepts it but type stub doesn't.
         app.state.copilotkit_sdk = CopilotKitRemoteEndpoint(agents=[ck_agent])  # pyright: ignore[reportArgumentType]

@@ -16,10 +16,52 @@ from typing import (
 import httpx
 
 from app.agents.core.agent_config import _AgentSettingsProxy
+from app.core.logging import logger
 from app.schemas.agent.types import (
     SourceField,
     SourceSchema,
 )
+
+# Dev/demo fallback when Salesforce OAuth is unavailable (mirrors intent_worker's
+# hard-coded object list when list_eligible_objects fails).
+_FALLBACK_OBJECT_NAMES = [
+    "Lead",
+    "Contact",
+    "Account",
+    "Opportunity",
+    "Campaign",
+    "CampaignMember",
+]
+
+_FALLBACK_FIELDS_BY_OBJECT: dict[str, list[SourceField]] = {
+    "Lead": [
+        SourceField(name="Id", label="Lead ID", type="id"),
+        SourceField(name="FirstName", label="First Name", type="string"),
+        SourceField(name="LastName", label="Last Name", type="string"),
+        SourceField(name="Email", label="Email", type="email"),
+        SourceField(name="Company", label="Company", type="string"),
+        SourceField(name="Phone", label="Phone", type="phone"),
+        SourceField(name="Status", label="Status", type="picklist"),
+        SourceField(name="LeadSource", label="Lead Source", type="picklist"),
+        SourceField(name="City", label="City", type="string"),
+        SourceField(name="State", label="State/Province", type="string"),
+        SourceField(name="Country", label="Country", type="string"),
+    ],
+    "Contact": [
+        SourceField(name="Id", label="Contact ID", type="id"),
+        SourceField(name="FirstName", label="First Name", type="string"),
+        SourceField(name="LastName", label="Last Name", type="string"),
+        SourceField(name="Email", label="Email", type="email"),
+        SourceField(name="Phone", label="Phone", type="phone"),
+        SourceField(name="AccountId", label="Account ID", type="reference"),
+    ],
+    "Account": [
+        SourceField(name="Id", label="Account ID", type="id"),
+        SourceField(name="Name", label="Account Name", type="string"),
+        SourceField(name="Industry", label="Industry", type="picklist"),
+        SourceField(name="Website", label="Website", type="url"),
+    ],
+}
 
 
 @runtime_checkable
@@ -56,6 +98,33 @@ class SalesforceClient:
         self.settings = settings
         self._token: str | None = None
         self._instance_url: str | None = None
+
+    def _credentials_configured(self) -> bool:
+        return bool(
+            self.settings.salesforce_client_id
+            and self.settings.salesforce_client_secret
+            and self.settings.salesforce_username
+            and self.settings.salesforce_password
+        )
+
+    @staticmethod
+    def _fallback_object_names() -> list[str]:
+        return list(_FALLBACK_OBJECT_NAMES)
+
+    @staticmethod
+    def _fallback_source_schema(object_name: str) -> SourceSchema:
+        fields = _FALLBACK_FIELDS_BY_OBJECT.get(object_name)
+        if not fields:
+            fields = [
+                SourceField(name="Id", label=f"{object_name} ID", type="id"),
+                SourceField(name="Name", label="Name", type="string"),
+            ]
+        logger.warning(
+            "salesforce_fallback_schema",
+            object_name=object_name,
+            field_count=len(fields),
+        )
+        return SourceSchema(object_name=object_name, fields=fields)
 
     async def authenticate(self) -> None:
         """Fetch + cache an OAuth access token. No-op if already authenticated."""
@@ -106,7 +175,13 @@ class SalesforceClient:
         include_custom: bool = True,
     ) -> list[str]:
         """Filter ``list_sobjects()`` to mappable objects (queryable, non-hidden)."""
-        sobjects = await self.list_sobjects()
+        if not self._credentials_configured():
+            return self._fallback_object_names()
+        try:
+            sobjects = await self.list_sobjects()
+        except Exception as exc:
+            logger.warning("salesforce_list_objects_failed", error=str(exc))
+            return self._fallback_object_names()
         standard_set = self._standard_object_set()
         eligible = [
             item.get("name", "")
@@ -122,9 +197,19 @@ class SalesforceClient:
 
     async def load_source_schema(self, object_name: str) -> SourceSchema:
         """Fetch + normalise an object's schema into a :class:`SourceSchema`."""
-        raw = await self.describe_object(object_name)
-        fields = [self._normalize_field(f) for f in raw.get("fields", [])]
-        return SourceSchema(object_name=object_name, fields=fields)
+        if not self._credentials_configured():
+            return self._fallback_source_schema(object_name)
+        try:
+            raw = await self.describe_object(object_name)
+            fields = [self._normalize_field(f) for f in raw.get("fields", [])]
+            return SourceSchema(object_name=object_name, fields=fields)
+        except Exception as exc:
+            logger.warning(
+                "salesforce_load_schema_failed",
+                object_name=object_name,
+                error=str(exc),
+            )
+            return self._fallback_source_schema(object_name)
 
     def _standard_object_set(self) -> set[str]:
         return {s.strip() for s in self.settings.salesforce_standard_objects.split(",") if s.strip()}

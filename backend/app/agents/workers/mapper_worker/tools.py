@@ -12,6 +12,7 @@ from pathlib import Path
 from app.agents.core.agent_config import _AgentSettingsProxy
 from app.agents.shared_tools.openai_client import OpenAIService
 from app.agents.shared_tools.vector_store import VectorStoreService
+from app.core.logging import logger
 from app.schemas.agent.types import ProposedMapping
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "core" / "prompts" / "mapper_system.txt"
@@ -86,11 +87,18 @@ class MapperAgent:
 
     async def _retrieve_examples(self, embeddings: list[list[float]], destination_type: str) -> list[dict]:
         rows: list[dict] = []
-        for emb in embeddings[:2]:
-            matches = await self.vector_store.search_examples(
-                emb, destination_type, top_k=self.settings.mapper_top_k_examples
+        try:
+            for emb in embeddings[:2]:
+                matches = await self.vector_store.search_examples(
+                    emb, destination_type, top_k=self.settings.mapper_top_k_examples
+                )
+                rows.extend(matches)
+        except Exception as exc:
+            logger.warning(
+                "mapper_example_retrieval_failed",
+                destination_type=destination_type,
+                error=str(exc),
             )
-            rows.extend(matches)
         return rows
 
     @staticmethod

@@ -2,7 +2,6 @@
 
 import "@copilotkit/react-core/v2/styles.css";
 
-import { HttpAgent } from "@ag-ui/client";
 import { CopilotKit } from "@copilotkit/react-core/v2";
 import { useMemo } from "react";
 
@@ -22,8 +21,8 @@ const COPILOT_RUNTIME_URL = `${BACKEND_URL}/api/v1/copilotkit/`;
  * runtime call. The agent name **must** match the backend's
  * `LangGraphAGUIAgent(name="datahash_agent", ...)` registration.
  *
- * We pre-register an {@link HttpAgent} so CopilotKit does not throw
- * "agent not found" during the brief window before /info discovery completes.
+ * Runtime discovery registers a single {@link ProxiedCopilotRuntimeAgent}
+ * so every turn (including HITL resume) reuses the same thread/checkpoint.
  */
 export function ChatProviders({
   sessionToken,
@@ -37,16 +36,6 @@ export function ChatProviders({
     [sessionToken],
   );
 
-  const agents = useMemo(
-    () => ({
-      [CHAT_AGENT_ID]: new HttpAgent({
-        url: COPILOT_RUNTIME_URL,
-        headers: authHeaders,
-      }),
-    }),
-    [authHeaders],
-  );
-
   return (
     <CopilotKit
       runtimeUrl={COPILOT_RUNTIME_URL}
@@ -54,7 +43,6 @@ export function ChatProviders({
       useSingleEndpoint
       enableInspector={false}
       headers={authHeaders}
-      agents__unsafe_dev_only={agents}
     >
       {children}
     </CopilotKit>
