@@ -8,6 +8,7 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from langgraph.graph import END
 
+from app.agents.core import deps
 from app.agents.core.messages import last_user_text
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.logging import logger
@@ -17,11 +18,10 @@ _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "core" / "prompts
 _DEFAULT_TEMPLATE = "Hi {display_name}, what signals would you want to send, and where? Describe it in your own words."
 
 
-def _load_welcome_template() -> str:
+def _load_welcome_system_prompt() -> str:
     if not _PROMPT_PATH.exists():
-        return _DEFAULT_TEMPLATE
-    text = _PROMPT_PATH.read_text(encoding="utf-8").strip()
-    return text or _DEFAULT_TEMPLATE
+        return ""
+    return _PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 
 def _display_name_from_email(email: str) -> str:
@@ -53,13 +53,23 @@ async def _resolve_display_name(state: GlobalAgentState) -> str:
     return "there"
 
 
-def render_welcome_message(display_name: str) -> str:
-    """Format the welcome prompt template with the user's display name."""
-    template = _load_welcome_template()
-    try:
-        return template.format(display_name=display_name)
-    except KeyError:
-        return _DEFAULT_TEMPLATE.format(display_name=display_name)
+def _fallback_welcome_message(display_name: str) -> str:
+    return _DEFAULT_TEMPLATE.format(display_name=display_name)
+
+
+async def _generate_welcome_message(display_name: str) -> str:
+    """Generate a personalised welcome via OpenAI, with a static fallback."""
+    system_prompt = _load_welcome_system_prompt()
+    if deps.openai.client and system_prompt:
+        parsed = await deps.openai.chat_json(
+            system_prompt,
+            f"Display name: {display_name}",
+        )
+        message = str(parsed.get("message") or "").strip()
+        if message:
+            return message
+
+    return _fallback_welcome_message(display_name)
 
 
 async def welcome_user(state: GlobalAgentState) -> dict[str, Any]:
@@ -68,7 +78,7 @@ async def welcome_user(state: GlobalAgentState) -> dict[str, Any]:
         return {}
 
     display_name = await _resolve_display_name(state)
-    message = render_welcome_message(display_name)
+    message = await _generate_welcome_message(display_name)
 
     update: dict[str, Any] = {
         "messages": [AIMessage(content=message)],
