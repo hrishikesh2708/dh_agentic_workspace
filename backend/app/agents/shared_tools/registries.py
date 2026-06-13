@@ -116,24 +116,18 @@ class InternalRegistryService:
 
 
 class CatalogService:
-    """UI catalog combining canonical + destination options for picker UIs."""
+    """UI catalog of destination options for picker UIs."""
 
     def __init__(self, settings: _AgentSettingsProxy) -> None:
-        """Initialise both child registries.
+        """Initialise the destination registry.
 
         Args:
-            settings: Agent settings proxy shared with the child registries.
+            settings: Agent settings proxy shared with the destination registry.
         """
-        self._internal = InternalRegistryService(settings)
         self._destinations = DestinationRegistryService(settings)
 
     def _list_destination_options_blocking(self) -> list[dict]:
-        options: list[dict] = []
-        canonical = self._internal.list_canonical_option()
-        if canonical.get("enabled", True):
-            options.append(canonical)
-        options.extend(self._destinations.list_destination_options())
-        return options
+        return self._destinations.list_destination_options()
 
     async def list_destination_options(self) -> list[dict]:
         """Async wrapper over the blocking YAML load."""

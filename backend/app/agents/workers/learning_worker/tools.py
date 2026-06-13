@@ -27,6 +27,7 @@ from app.core.metrics import (
     golden_rule_hits_total,
     mapping_runs_total,
 )
+from app.agents.core.intent_validation import source_connector_id
 from app.models.field_mapping import FieldMapping
 from app.models.golden_rule import GoldenRule
 from app.models.mapping_session import MappingSession
@@ -97,7 +98,7 @@ async def persist_session(state, session_maker, kind: str) -> dict[str, Any]:
         if kind == "canonical":
             dest_type = "canonical"
 
-        source_value = state.source.value if state.source else "salesforce"
+        source_value = source_connector_id(state.source, fallback="salesforce")
         ms = MappingSession(
             customer_id=customer_id,
             source=source_value,

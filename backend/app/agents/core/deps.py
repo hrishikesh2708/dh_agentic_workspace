@@ -1,7 +1,7 @@
 """Lazily-initialised singletons for shared services + pipeline agents.
 
 Stage 1 wave 3 lands only the foundational services (OpenAI, Salesforce,
-vector store, catalog, registries) plus the SQLAlchemy session maker. The
+vector store, connector schema registry) plus the SQLAlchemy session maker. The
 remaining pipeline-agent singletons (mapper, validator, scorer, learner,
 schema_extractor, internal_schema, schema_registry) are appended as each
 worker module is ported in Wave 4.
@@ -19,10 +19,11 @@ from sqlalchemy.ext.asyncio import (
 
 from app.agents.core.agent_config import agent_settings
 from app.agents.shared_tools.openai_client import OpenAIService
-from app.agents.shared_tools.registries import (
-    CatalogService,
+from app.services.connector_schema import (
+    ConnectorSchemaService,
     DestinationRegistryService,
     InternalRegistryService,
+    SourceRegistryService,
 )
 from app.agents.shared_tools.salesforce_client import SalesforceClient
 from app.agents.shared_tools.vector_store import VectorStoreService
@@ -41,14 +42,19 @@ from app.agents.workers.schema_worker.tools import (
 settings = agent_settings
 
 # --- External-service clients (foundational) ---
-catalog = CatalogService(agent_settings)
 openai = OpenAIService(agent_settings)
 vector_store = VectorStoreService(agent_settings)
 salesforce = SalesforceClient(agent_settings)
 
+# --- Shared async DB engine (used by learning_worker + connector catalog) ---
+db_engine = create_async_engine(agent_settings.database_url, echo=False, future=True)
+session_maker = async_sessionmaker(db_engine, expire_on_commit=False)
+
 # --- Schema registry services (used by schema_worker + reviewer_worker) ---
-destination_registry = DestinationRegistryService(agent_settings)
-internal_registry = InternalRegistryService(agent_settings)
+connector_schema = ConnectorSchemaService(agent_settings, session_maker)
+destination_registry = DestinationRegistryService(agent_settings, session_maker)
+internal_registry = InternalRegistryService(agent_settings, session_maker)
+source_registry = SourceRegistryService(agent_settings, session_maker)
 
 # --- Schema-stage pipeline agents (Wave 4: schema_worker) ---
 schema_extractor = SchemaExtractorAgent(salesforce)
@@ -57,10 +63,6 @@ schema_registry = SchemaRegistryAgent(agent_settings)
 
 # --- Mapper pipeline agent (Wave 4: mapper_worker) ---
 mapper = MapperAgent(agent_settings, openai, vector_store)
-
-# --- Shared async DB engine (used by learning_worker for session persistence) ---
-db_engine = create_async_engine(agent_settings.database_url, echo=False, future=True)
-session_maker = async_sessionmaker(db_engine, expire_on_commit=False)
 
 # --- Reviewer-stage pipeline agents (Wave 4: reviewer_worker) ---
 validator = ValidatorAgent()

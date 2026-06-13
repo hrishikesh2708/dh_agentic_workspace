@@ -42,7 +42,7 @@ class GlobalAgentState(BaseModel):
 
     # --- Run mode + intent (Phase 1: intent_worker) ---
     run_mode: str = "canonical_only"
-    source: Sources = Sources.salesforce
+    source: Sources | None = None
     source_object: str = ""
     destination_type: str = ""
     available_objects: list[str] = Field(default_factory=list)

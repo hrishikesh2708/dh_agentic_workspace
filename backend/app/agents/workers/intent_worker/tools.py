@@ -35,18 +35,20 @@ from app.agents.core import deps
 from app.agents.core.constants import (
     INTENT_PHASE,
     INTENT_PICKERS,
-    SOURCE_OPTIONS,
-    source_label,
 )
 from app.core.metrics import hitl_interruptions_total
 from app.agents.core.intent_validation import (
     canonicalize_object_name,
     compute_run_mode,
-    enabled_source_options,
-    first_enabled_source_id,
+    enabled_source_ids_from_options,
+    first_enabled_source_id_from_options,
     is_valid_destination,
     is_valid_source,
+    match_destination_slug,
+    match_source_label,
     normalize_optional_str,
+    source_connector_id,
+    source_label_from,
 )
 from app.agents.core.messages import (
     intent_complete_message,
@@ -78,31 +80,38 @@ _MAPPING_RESET_KEYS: dict[str, Any] = {
 # -----------------------------------------------------------------------------
 
 
-def build_select_source_interrupt() -> dict:
+async def _source_catalog() -> tuple[list[dict], set[str], str]:
+    """Load source picker options, valid IDs, and default selection from the DB."""
+    options = await deps.connector_schema.list_picker_source_options()
+    valid_ids = enabled_source_ids_from_options(options)
+    default = first_enabled_source_id_from_options(options)
+    return options, valid_ids, default
+
+
+async def build_select_source_interrupt() -> dict:
     """HITL payload for picking a source CRM."""
     picker = INTENT_PICKERS["source"]
-    enabled = enabled_source_options()
-    default = enabled[0]["id"] if enabled else None
+    options, _, default = await _source_catalog()
     return {
         "type": "select_source",
         "phase": INTENT_PHASE,
         "title": picker["title"],
         "message": picker["message"],
         "hint": None,
-        "options": SOURCE_OPTIONS,
+        "options": options,
         "requested": None,
         "default_selected": default,
     }
 
 
-def build_select_object_interrupt(
+async def build_select_object_interrupt(
     *,
     source: str,
     objects: list[str],
     requested: str | None,
 ) -> dict:
     """HITL payload for picking a source object (Lead/Contact/etc.)."""
-    src_label = source_label(source)
+    src_label = await deps.connector_schema.source_label(source)
     matched = canonicalize_object_name(requested, objects)
     default = matched or (objects[0] if objects else None)
     hint = None
@@ -125,7 +134,7 @@ def build_select_destination_interrupt(
     options: list[dict],
     requested: str | None = None,
 ) -> dict:
-    """HITL payload for picking a destination type (canonical/meta_capi/...)."""
+    """HITL payload for picking a destination type (meta_capi/google_dm/...)."""
     picker = INTENT_PICKERS["destination"]
     valid = [o for o in options if o.get("enabled", True)]
     default = valid[0]["id"] if valid else None
@@ -148,21 +157,20 @@ def build_select_destination_interrupt(
     }
 
 
-def build_unsupported_source_interrupt(*, source: str) -> dict:
+async def build_unsupported_source_interrupt(*, source: str) -> dict:
     """HITL payload telling the user to re-pick a source (theirs isn't supported yet)."""
     picker = INTENT_PICKERS["source"]
-    option = next((o for o in SOURCE_OPTIONS if o["id"] == source.lower()), None)
-    label = str(option["label"]) if option else source
-    enabled = enabled_source_options()
+    options, _, default = await _source_catalog()
+    label = await deps.connector_schema.source_label(source)
     return {
         "type": "select_source",
         "phase": INTENT_PHASE,
         "title": picker["title"],
         "message": picker["message"],
         "hint": f"{label} is not supported yet. Select an available source.",
-        "options": SOURCE_OPTIONS,
+        "options": options,
         "requested": source,
-        "default_selected": enabled[0]["id"] if enabled else None,
+        "default_selected": default,
     }
 
 
@@ -172,10 +180,16 @@ def build_unsupported_source_interrupt(*, source: str) -> dict:
 
 
 async def _build_parse_system_prompt() -> str:
-    source_ids = [o["id"] for o in enabled_source_options()]
-    dest_ids = sorted(await deps.catalog.enabled_destination_ids())
-    source_union = " | ".join(f'"{s}"' for s in source_ids) or '"salesforce"'
-    dest_union = " | ".join(f'"{d}"' for d in dest_ids) or '"canonical"'
+    sources = await deps.source_registry.list_source()
+    destinations = await deps.destination_registry.list_destinations()
+    source_union = (
+        " | ".join(f'"{s.parent_connector_name if s.parent_connector_name else s.display_name}"' for s in sources)
+        or "null"
+    )
+    dest_union = (
+        " | ".join(f'"{d.parent_connector_name if d.parent_connector_name else d.display_name}"' for d in destinations)
+        or "null"
+    )
     return f"""Extract mapping intent from the user message. Return ONLY valid JSON:
 {{
   "source": {source_union} | null,
@@ -195,12 +209,18 @@ def _resume_selected(response: Any, *, fallback: str) -> str:
     return selected or fallback
 
 
-def _coerce_source(value: str) -> Sources:
-    """Coerce a validated lowercase id back to the :class:`Sources` enum."""
-    try:
-        return Sources(value)
-    except ValueError:
-        return Sources.salesforce
+async def _coerce_source(source_id: str) -> Sources:
+    """Resolve a source slug (from HITL or parsing) to a :class:`Sources` row."""
+    needle = source_id.lower().strip()
+    sources = await deps.source_registry.list_source()
+    for source in sources:
+        if source.connector_id.lower() == needle:
+            return source
+    return Sources(
+        connector_id=needle,
+        connector_type="source",
+        display_name=source_label_from(needle, sources),
+    )
 
 
 async def _finish_phase_one(
@@ -253,10 +273,12 @@ async def parse_initial_intent(state: GlobalAgentState) -> dict[str, Any]:
     raw_object = normalize_optional_str(parsed.get("source_object"))
     raw_dest = normalize_optional_str(parsed.get("destination"))
 
-    valid_dest_ids = await deps.catalog.enabled_destination_ids()
-    source: str = raw_source if (raw_source and is_valid_source(raw_source)) else ""
+    valid_sources = await deps.source_registry.list_source()
+    valid_destinations = await deps.destination_registry.list_destinations()
+    matched_source = match_source_label(raw_source, valid_sources)
+    source: str = matched_source.connector_id if matched_source else ""
     source_object = raw_object or ""
-    destination_type: str = raw_dest if (raw_dest and is_valid_destination(raw_dest, valid_dest_ids)) else ""
+    destination_type: str = match_destination_slug(raw_dest, valid_destinations)
 
     narrator = await intent_narrator_message(
         user_text,
@@ -281,27 +303,27 @@ async def parse_initial_intent(state: GlobalAgentState) -> dict[str, Any]:
     # Only set ``source`` when we have a valid value — otherwise leave the
     # field untouched (the state's default is :class:`Sources.salesforce`).
     if source:
-        update["source"] = _coerce_source(source)
+        update["source"] = await _coerce_source(source)
     return update
 
 
 async def gather_source(state: GlobalAgentState) -> dict[str, Any]:
     """HITL gather for the source CRM (no-op if already valid)."""
-    current = state.source.value if state.source else ""
+    current = source_connector_id(state.source)
     source = normalize_optional_str(current) or ""
+    _, valid_source_ids, fallback = await _source_catalog()
 
-    if is_valid_source(source):
+    if is_valid_source(source, valid_source_ids):
         return {}
 
     hitl_interruptions_total.labels(interrupt_type="select_source").inc()
-    response: Any = interrupt(build_select_source_interrupt())
-    fallback = first_enabled_source_id()
+    response: Any = interrupt(await build_select_source_interrupt())
     selected = _resume_selected(response, fallback=fallback)
-    if not is_valid_source(selected):
+    if not is_valid_source(selected, valid_source_ids):
         selected = fallback
 
     return {
-        "source": _coerce_source(selected),
+        "source": await _coerce_source(selected),
         "messages": [
             await intent_gather_event("source", "confirmed", source_id=selected),
         ],
@@ -311,17 +333,18 @@ async def gather_source(state: GlobalAgentState) -> dict[str, Any]:
 async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
     """HITL gather for the source object — list eligible objects and pick one."""
     messages: list[Any] = []
-    current_source = state.source.value if state.source else ""
-    initial_source = normalize_optional_str(current_source) or first_enabled_source_id()
+    _, valid_source_ids, default_source_id = await _source_catalog()
+    current_source = source_connector_id(state.source)
+    initial_source = normalize_optional_str(current_source) or default_source_id
     source = initial_source
     requested = normalize_optional_str(state.source_object)
 
     if source.lower() not in _SUPPORTED_OBJECT_SOURCES:
         hitl_interruptions_total.labels(interrupt_type="select_source").inc()
-        response: Any = interrupt(build_unsupported_source_interrupt(source=source))
-        selected_source = _resume_selected(response, fallback=first_enabled_source_id())
-        if not is_valid_source(selected_source):
-            selected_source = first_enabled_source_id()
+        response: Any = interrupt(await build_unsupported_source_interrupt(source=source))
+        selected_source = _resume_selected(response, fallback=default_source_id)
+        if not is_valid_source(selected_source, valid_source_ids):
+            selected_source = default_source_id
         source = selected_source
         requested = None
         if source != initial_source:
@@ -351,14 +374,14 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
             "available_objects": objects,
         }
         if source != initial_source:
-            result["source"] = _coerce_source(source)
+            result["source"] = await _coerce_source(source)
         if messages:
             result["messages"] = messages
         return result
 
     hitl_interruptions_total.labels(interrupt_type="select_object").inc()
     response = interrupt(
-        build_select_object_interrupt(
+        await build_select_object_interrupt(
             source=source,
             objects=objects,
             requested=requested,
@@ -383,18 +406,19 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
         "messages": messages,
     }
     if source != initial_source:
-        result["source"] = _coerce_source(source)
+        result["source"] = await _coerce_source(source)
     return result
 
 
 async def gather_destination(state: GlobalAgentState) -> dict[str, Any]:
     """HITL gather for the destination type — closes the intent phase."""
     dest = normalize_optional_str(state.destination_type) or ""
-    destination_options = await deps.catalog.list_destination_options()
-    valid_ids = await deps.catalog.enabled_destination_ids()
+    destination_options = await deps.connector_schema.list_destination_options()
+    valid_ids = await deps.connector_schema.enabled_destination_ids()
+    _, _, default_source_id = await _source_catalog()
 
-    current_source = state.source.value if state.source else ""
-    source = normalize_optional_str(current_source) or first_enabled_source_id()
+    current_source = source_connector_id(state.source)
+    source = normalize_optional_str(current_source) or default_source_id
     source_object = normalize_optional_str(state.source_object) or ""
     objects = list(state.available_objects or [])
 
@@ -423,7 +447,7 @@ async def gather_destination(state: GlobalAgentState) -> dict[str, Any]:
             requested=dest or None,
         ),
     )
-    fallback = destination_options[0]["id"] if destination_options else "canonical"
+    fallback = destination_options[0]["id"] if destination_options else ""
     selected = _resume_selected(response, fallback=fallback)
     if not is_valid_destination(selected, valid_ids):
         selected = next(

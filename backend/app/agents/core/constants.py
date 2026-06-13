@@ -18,7 +18,7 @@ INTENT_PICKERS = {
     },
 }
 
-# Sources stay hardcoded until SourceRegistryService is added (HubSpot, etc.).
+# Legacy fallback used only by tests and static helpers outside the DB-backed intent flow.
 SOURCE_OPTIONS = [
     {"id": "salesforce", "label": "Salesforce", "enabled": True},
     {"id": "hubspot", "label": "HubSpot", "enabled": False},

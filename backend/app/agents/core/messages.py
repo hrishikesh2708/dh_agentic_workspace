@@ -35,6 +35,7 @@ from app.agents.core.intent_validation import (
     is_valid_destination,
     is_valid_source,
     normalize_optional_str,
+    source_connector_id,
 )
 from app.agents.core.narratives import (
     CANONICAL_LABEL,
@@ -59,7 +60,7 @@ Use ONLY the validated fields listed. Do not mention sources, objects, or destin
 
 async def destination_label(dest_id: str) -> str:
     """Resolve a destination ID to its label via the catalog."""
-    return await deps.catalog.destination_label(dest_id)
+    return await deps.connector_schema.destination_label(dest_id)
 
 
 def _event_id(phase: str, step: str, status: str) -> str:
@@ -146,13 +147,15 @@ async def intent_narrator_message(
     dest_label = ""
     obj = (source_object or "").strip()
 
-    if source and is_valid_source(source):
-        src_label = source_label(source)
-        validated_parts.append(f"source: {src_label}")
+    if source:
+        valid_source_ids = await deps.connector_schema.enabled_source_ids()
+        if is_valid_source(source, valid_source_ids):
+            src_label = await deps.connector_schema.source_label(source)
+            validated_parts.append(f"source: {src_label}")
     if obj:
         validated_parts.append(f"object: {obj}")
     if destination_type:
-        valid_ids = await deps.catalog.enabled_destination_ids()
+        valid_ids = await deps.connector_schema.enabled_destination_ids()
         if is_valid_destination(destination_type, valid_ids):
             dest_label = await destination_label(destination_type)
             validated_parts.append(f"destination: {dest_label}")
@@ -207,12 +210,13 @@ async def intent_gather_event(
 ) -> AIMessage:
     """Narration for an intent_worker gather step (source / object / destination)."""
     dest_label = await destination_label(destination_id) if destination_id else ""
+    src_label = await deps.connector_schema.source_label(source_id) if source_id else ""
     return narrative_message(
         INTENT_PHASE,
         step,
         status,
         source=source_id,
-        source_label_value=source_label(source_id) if source_id else "",
+        source_label_value=src_label,
         source_object=source_object,
         destination_type=destination_id,
         destination_label_value=dest_label,
@@ -229,7 +233,8 @@ async def intent_complete_message(
     valid_destination_ids: set[str] | None = None,
 ) -> AIMessage | None:
     """'Setup complete' ack at the end of the intent phase."""
-    if not is_valid_source(source):
+    valid_source_ids = await deps.connector_schema.enabled_source_ids()
+    if not is_valid_source(source, valid_source_ids):
         return None
 
     obj = (source_object or "").strip()
@@ -248,7 +253,7 @@ async def intent_complete_message(
     elif not dest:
         return None
 
-    src_label = source_label(source)
+    src_label = await deps.connector_schema.source_label(source)
     dest_label = await destination_label(dest)
     labels = {
         "source_label": src_label,
@@ -282,12 +287,13 @@ async def canonical_narrative_event(
     labels: dict[str, str] | None = None,
 ) -> AIMessage:
     """Narration for a canonical-phase step (bridge / map)."""
-    source = normalize_optional_str(state.source.value if state.source else None) or "salesforce"
+    source = normalize_optional_str(source_connector_id(state.source)) or "salesforce"
+    src_label = await deps.connector_schema.source_label(source)
     obj = state.source_object or "records"
     dest_type = state.destination_type or ""
     dest_label = await destination_label(dest_type) if dest_type else ""
     base = {
-        "source_label": source_label(source),
+        "source_label": src_label,
         "object": obj,
         "dest_label": dest_label,
         "canonical_label": CANONICAL_LABEL,
@@ -380,7 +386,7 @@ def canonical_stage_complete_message(
 ) -> AIMessage:
     """'Mapping complete' for the canonical stage (always followed by projection or END)."""
     source_object = state.source_object or "records"
-    src_label = source_label(state.source.value if state.source else "salesforce")
+    src_label = state.source.display_name if state.source else source_label(source_connector_id(state.source))
     payload = build_mapping_complete_payload(
         mappings,
         mapping_kind="canonical",
@@ -400,7 +406,7 @@ async def mapping_complete_message(state: GlobalAgentState) -> AIMessage:
     run_mode = state.run_mode or "canonical_only"
     mapping_kind = "projection" if run_mode == "projection" else "canonical"
     source_object = state.source_object or "records"
-    src_label = source_label(state.source.value if state.source else "salesforce")
+    src_label = await deps.connector_schema.source_label(source_connector_id(state.source))
     dest_label = await destination_label(state.destination_type or "")
 
     if mapping_kind == "projection":

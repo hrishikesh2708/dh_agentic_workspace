@@ -27,13 +27,26 @@ class MappingStatus(str, Enum):
     human_corrected = "human_corrected"
 
 
-class Sources(str, Enum):
+class Sources(BaseModel):
     """Source CRMs we can ingest from."""
 
-    salesforce = "salesforce"
-    hubspot = "hubspot"
-    postgres = "postgres"
-    snowflake = "snowflake"
+    connector_id: str
+    connector_type: str
+    display_name: str
+    sub_connector_of: str | None = None
+    parent_connector_id: str | None = None
+    parent_connector_name: str | None = None
+
+
+class Destinations(BaseModel):
+    """Destinations we can send data  to."""
+
+    connector_id: str
+    connector_type: str
+    display_name: str
+    sub_connector_of: str | None = None
+    parent_connector_id: str | None = None
+    parent_connector_name: str | None = None
 
 
 class ValidationStatus(str, Enum):
@@ -64,11 +77,13 @@ class SourceSchema(BaseModel):
 
 
 class DestinationField(BaseModel):
-    """A single field on the destination schema (canonical or projection)."""
+    """A single field on the destination schema."""
 
     name: str
     type: str
+    canonical_key: str
     required: bool = False
+    transform_function: str | None = None
     description: str | None = None
     enum_values: list[str] = Field(default_factory=list)
     constraints: dict[str, Any] = Field(default_factory=dict)
@@ -77,12 +92,30 @@ class DestinationField(BaseModel):
 class DestinationSchema(BaseModel):
     """The full destination schema (canonical, meta_capi, google_dm, ...)."""
 
-    destination_type: str
-    version: str = "1.0"
-    label: str | None = None
+    destination: str
+    label: str
     description: str | None = None
-    enabled: bool = True
+    status: str
     fields: list[DestinationField]
+
+
+class CanonicalSchemaField(BaseModel):
+    """A single field in the Datahash canonical schema."""
+
+    canonical_key: str
+    field_label: str
+    field_hint: str | None = None
+    field_category: str
+    is_pii: bool = False
+
+
+class CanonicalSchema(BaseModel):
+    """The full canonical schema loaded from the ``canonical_field`` table."""
+
+    canonical: str = "canonical"
+    label: str = "Datahash Canonical"
+    description: str | None = "Internal canonical schema"
+    fields: list[CanonicalSchemaField]
 
 
 class ProposedMapping(BaseModel):

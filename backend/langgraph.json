@@ -1,7 +1,7 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "datahash_agent": "./app/agents/__init__.py:build_studio_graph"
+    "intent_worker": "./app/agents/workers/intent_worker/graph.py:build"
   },
   "env": ".env.development",
   "python_version": "3.13"
