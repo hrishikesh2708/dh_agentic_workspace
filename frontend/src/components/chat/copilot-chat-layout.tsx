@@ -14,6 +14,7 @@ export function CopilotChatLayout({
   projectName,
   banner,
   footerExtra,
+  stepInfo,
 }: {
   children?: React.ReactNode;
   draft?: string;
@@ -24,7 +25,12 @@ export function CopilotChatLayout({
   projectName?: string;
   banner?: React.ReactNode;
   footerExtra?: React.ReactNode;
+  stepInfo?: { step: number; total: number; label: string } | null;
 }) {
+  const stepSubtitle = stepInfo
+    ? `Step ${stepInfo.step} of ${stepInfo.total} · ${stepInfo.label}`
+    : "Ready to set up your pipeline";
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--background)]">
       <header className="shrink-0 border-b border-[var(--border)]">
@@ -37,8 +43,8 @@ export function CopilotChatLayout({
               <h1 className="truncate text-lg font-semibold text-[var(--foreground)]">
                 Signals Setup Copilot
               </h1>
-              <p className="text-sm text-[var(--muted-foreground)]">
-                Step 1 · Start mapping setup
+              <p className="text-sm text-[var(--muted-foreground)] transition-all duration-300">
+                {stepSubtitle}
               </p>
             </div>
           </div>

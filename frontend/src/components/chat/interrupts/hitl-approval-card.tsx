@@ -3,13 +3,14 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import type {
   ApprovalInterruptPayload,
-  DestinationFieldOption,
-  MappingField,
-  MappingSummary,
+  CanonicalMappingRow,
+  ChannelConnectionStatus,
+  MappingDestination,
+  MappingReviewRow,
   SelectOption,
+  UnresolvedField,
 } from "@/hooks/use-headless-interrupt";
 import { normalizeInterruptPayload } from "@/lib/normalize-interrupt-payload";
 
@@ -20,7 +21,7 @@ export interface HitlApprovalCardProps {
 }
 
 function InterruptHeader({ payload }: { payload: ApprovalInterruptPayload }) {
-  if (!payload.title && !payload.message && !payload.hint) return null;
+  if (!payload.title && !payload.message) return null;
   return (
     <div>
       {payload.title ? (
@@ -29,45 +30,7 @@ function InterruptHeader({ payload }: { payload: ApprovalInterruptPayload }) {
       {payload.message ? (
         <p className="text-xs text-[var(--muted-foreground)] mt-0.5">{payload.message}</p>
       ) : null}
-      {payload.hint ? (
-        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">{payload.hint}</p>
-      ) : null}
     </div>
-  );
-}
-
-// ── Generic approval card ──────────────────────────────────────────────────
-
-function GenericApprovalCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
-  const [reason, setReason] = useState("");
-  return (
-    <Card className="border-amber-500/50 bg-amber-500/5">
-      <CardContent className="p-4 space-y-4">
-        <div>
-          <p className="text-sm font-medium text-[var(--foreground)]">Approval required</p>
-          <p className="text-sm text-[var(--muted-foreground)] mt-1">
-            Review this proposed action before the agent continues.
-          </p>
-        </div>
-        <p className="text-sm rounded-md border border-[var(--border)] bg-[var(--background)] p-3">
-          {payload.proposal ?? "No proposal provided."}
-        </p>
-        <Input
-          placeholder="Optional note (reason)"
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          className="text-sm"
-        />
-        <div className="flex gap-2">
-          <Button type="button" onClick={() => onApprove({ approved: true, reason: reason.trim() || undefined })}>
-            Approve
-          </Button>
-          <Button type="button" variant="outline" onClick={() => onReject(reason.trim() || undefined)}>
-            Reject
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -83,42 +46,60 @@ function SelectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
   const [selected, setSelected] = useState<string>(defaultId);
 
   return (
-    <Card className="border-blue-500/40 bg-blue-500/5">
+    <Card className="border-[var(--border)] bg-[var(--card)]">
       <CardContent className="p-4 space-y-4">
         <InterruptHeader payload={payload} />
-        <div className="grid grid-cols-2 gap-2">
+
+        <div className="flex flex-wrap gap-2">
           {options.map((opt) => {
             const isEnabled = opt.enabled !== false;
             const isSelected = selected === opt.id;
+
             return (
               <button
                 key={opt.id}
                 type="button"
                 disabled={!isEnabled}
                 onClick={() => isEnabled && setSelected(opt.id)}
+                style={{ borderRadius: isSelected ? "8px" : "9999px" }}
                 className={[
-                  "rounded-lg border px-4 py-3 text-left text-sm transition-colors",
-                  isEnabled ? "cursor-pointer" : "cursor-not-allowed opacity-40",
-                  isSelected && isEnabled
-                    ? "border-blue-500 bg-blue-500/10 text-[var(--foreground)]"
-                    : "border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] hover:border-blue-400/60",
+                  "inline-flex items-center gap-2 border px-3 py-1.5 text-sm font-medium",
+                  "transition-all duration-300 ease-in-out",
+                  isEnabled ? "cursor-pointer" : "cursor-not-allowed opacity-35",
+                  isSelected
+                    ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                    : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/40 hover:bg-[var(--secondary)]",
                 ].join(" ")}
               >
-                <span className="font-medium">{opt.label}</span>
+                {/* Radio indicator */}
+                <span className={[
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-all duration-300",
+                  isSelected
+                    ? "border-[var(--primary)] bg-[var(--primary)]"
+                    : "border-[var(--muted-foreground)]/50 bg-transparent",
+                ].join(" ")}>
+                  {isSelected && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                  )}
+                </span>
+                {opt.label}
                 {!isEnabled && (
-                  <span className="block text-xs mt-0.5 text-[var(--muted-foreground)]">Coming soon</span>
+                  <span className="text-xs text-[var(--muted-foreground)] opacity-60">· soon</span>
                 )}
               </button>
             );
           })}
         </div>
+
         <Button
           type="button"
           disabled={!selected}
           onClick={() => onApprove({ selected })}
           className="w-full"
         >
-          Continue with {options.find((o) => o.id === selected)?.label ?? selected}
+          {selected
+            ? `Continue with ${options.find((o) => o.id === selected)?.label ?? selected}`
+            : "Select a source"}
         </Button>
       </CardContent>
     </Card>
@@ -129,339 +110,778 @@ function SelectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
 
 function SelectObjectCard({ payload, onApprove }: HitlApprovalCardProps) {
   const rawOptions = payload.options ?? [];
-  const objects = rawOptions.map((o) => (typeof o === "string" ? o : (o as SelectOption).id));
   const requested = payload.requested ?? "";
 
-  const defaultObject =
-    payload.default_selected && objects.includes(payload.default_selected)
-      ? payload.default_selected
-      : requested && objects.includes(requested)
-        ? requested
-        : objects[0] ?? "";
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<string>(defaultObject);
+  // Normalise to strings, put suggested first
+  const allObjects = rawOptions.map((o) => (typeof o === "string" ? o : (o as SelectOption).id));
+  const suggested = allObjects.find(
+    (o) => o.toLowerCase() === requested.toLowerCase(),
+  ) ?? allObjects[0] ?? "";
+  const rest = allObjects.filter((o) => o !== suggested);
+  const objects = suggested ? [suggested, ...rest] : allObjects;
 
-  const filtered = objects.filter((o) => o.toLowerCase().includes(search.toLowerCase()));
+  const [selected, setSelected] = useState<string>(suggested);
 
   return (
-    <Card className="border-violet-500/40 bg-violet-500/5">
+    <Card className="border-[var(--border)] bg-[var(--card)]">
       <CardContent className="p-4 space-y-4">
         <InterruptHeader payload={payload} />
-        <Input
-          placeholder="Search objects…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="text-sm"
-        />
-        <div className="max-h-52 overflow-y-auto rounded-md border border-[var(--border)] divide-y divide-[var(--border)]">
-          {filtered.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-[var(--muted-foreground)]">No matches</p>
-          ) : (
-            filtered.map((obj) => (
+
+        <div className="flex flex-wrap gap-2">
+          {objects.map((obj) => {
+            const isSelected = selected === obj;
+            const isSuggested = obj === suggested;
+
+            return (
               <button
                 key={obj}
                 type="button"
                 onClick={() => setSelected(obj)}
+                style={{ borderRadius: isSelected ? "8px" : "9999px" }}
                 className={[
-                  "w-full text-left px-3 py-2 text-sm transition-colors",
-                  selected === obj
-                    ? "bg-violet-500/15 text-[var(--foreground)] font-medium"
-                    : "text-[var(--muted-foreground)] hover:bg-[var(--secondary)]",
-                ].join(" ")}
-              >
-                {obj}
-              </button>
-            ))
-          )}
-        </div>
-        <Button
-          type="button"
-          disabled={!selected}
-          onClick={() => onApprove({ selected })}
-          className="w-full"
-        >
-          Use {selected}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ── Select destination card ────────────────────────────────────────────────
-
-const DESTINATION_ICONS: Record<string, string> = {
-  canonical: "🗄️",
-  meta_capi: "📣",
-  google_dm: "📊",
-};
-
-function SelectDestinationCard({ payload, onApprove }: HitlApprovalCardProps) {
-  const options = (payload.options ?? []) as SelectOption[];
-  const defaultId =
-    payload.default_selected && options.some((o) => o.id === payload.default_selected)
-      ? payload.default_selected
-      : options[0]?.id ?? "";
-  const [selected, setSelected] = useState<string>(defaultId);
-
-  return (
-    <Card className="border-emerald-500/40 bg-emerald-500/5">
-      <CardContent className="p-4 space-y-4">
-        <InterruptHeader payload={payload} />
-        <div className="grid grid-cols-1 gap-2">
-          {options.map((opt) => {
-            const icon = DESTINATION_ICONS[opt.id] ?? "📦";
-            const description = opt.description ?? "";
-            const isSelected = selected === opt.id;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setSelected(opt.id)}
-                className={[
-                  "rounded-lg border px-4 py-3 text-left transition-colors",
+                  "inline-flex items-center gap-2 border px-3 py-1.5 text-sm font-medium",
+                  "transition-all duration-300 ease-in-out cursor-pointer",
                   isSelected
-                    ? "border-emerald-500 bg-emerald-500/10"
-                    : "border-[var(--border)] bg-[var(--background)] hover:border-emerald-400/60",
+                    ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                    : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/40 hover:bg-[var(--secondary)]",
                 ].join(" ")}
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">{icon}</span>
-                  <div>
-                    <p className="text-sm font-medium text-[var(--foreground)]">{opt.label}</p>
-                    {description ? (
-                      <p className="text-xs text-[var(--muted-foreground)]">{description}</p>
-                    ) : null}
-                  </div>
-                  {isSelected && (
-                    <span className="ml-auto text-emerald-600 dark:text-emerald-400 text-xs font-medium">✓ Selected</span>
-                  )}
-                </div>
+                {/* Radio indicator */}
+                <span className={[
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-all duration-300",
+                  isSelected
+                    ? "border-[var(--primary)] bg-[var(--primary)]"
+                    : "border-[var(--muted-foreground)]/50 bg-transparent",
+                ].join(" ")}>
+                  {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </span>
+
+                {obj}
+
+                {isSuggested && (
+                  <span className={[
+                    "text-xs transition-colors duration-300",
+                    isSelected ? "text-[var(--primary)]/70" : "text-[var(--muted-foreground)]",
+                  ].join(" ")}>
+                    suggested
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
+
         <Button
           type="button"
           disabled={!selected}
           onClick={() => onApprove({ selected })}
           className="w-full"
         >
-          Continue
+          {selected ? `Continue with ${selected}` : "Select an object"}
         </Button>
       </CardContent>
     </Card>
   );
 }
 
-// ── Confidence badge ───────────────────────────────────────────────────────
+// ── Mapping status dot ─────────────────────────────────────────────────────
 
-function ConfidenceBadge({ value }: { value: number }) {
-  const pct = Math.round(value * 100);
-  const color =
-    pct >= 90
-      ? "bg-green-500/15 text-green-700 dark:text-green-400"
-      : pct >= 50
-      ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-      : "bg-red-500/15 text-red-700 dark:text-red-400";
-  return (
-    <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${color}`}>
-      {pct}%
-    </span>
-  );
+function MappingStatusDot({ status }: { status: string }) {
+  const cls =
+    status === "confident"   ? "bg-green-500" :
+    status === "needs_input" ? "bg-amber-500" :
+    status === "missing"     ? "bg-red-500"   : "";
+  if (!cls) return null;
+  return <span className={`h-2.5 w-2.5 rounded-full shrink-0 inline-block ${cls}`} />;
 }
 
-// ── Mapping review card ────────────────────────────────────────────────────
+// ── Platform colours ────────────────────────────────────────────────────────
 
-type RowOverride = { destination_field: string; status: "human_approved" | "human_corrected" };
+const PLATFORM_COLORS: Record<string, string> = {
+  meta_capi:      "#1877F2",
+  google_offline: "#EA4335",
+  google_dm:      "#FBBC04",
+  tiktok:         "#010101",
+  snapchat:       "#FFFC00",
+  linkedin:       "#0A66C2",
+  twitter:        "#1DA1F2",
+  bing:           "#008373",
+};
 
-const SELECT_CLASS =
-  "h-7 w-full min-w-[10rem] rounded-md border border-[var(--border)] bg-[var(--background)] px-2 text-xs text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-blue-500";
+// ── Mapping review card (single + multi destination) ───────────────────────
 
-function buildDestinationOptions(
-  schemaFields: DestinationFieldOption[],
-  mappings: MappingField[],
-): DestinationFieldOption[] {
-  const byName = new Map(schemaFields.map((f) => [f.name, f]));
-  for (const m of mappings) {
-    const suggested = m.destination_field?.trim();
-    if (suggested && !byName.has(suggested)) {
-      byName.set(suggested, { name: suggested, label: suggested });
-    }
-  }
-  return Array.from(byName.values());
-}
-
-function formatMappingStatus(status?: string): string {
-  if (status === "not_proposed") return "Not mapped";
-  return status?.replace(/_/g, " ") ?? "";
-}
-
-function computeMappingSummary(mappings: MappingField[]): MappingSummary {
-  return {
-    total_source_fields: mappings.length,
-    mapped: mappings.filter((m) => m.destination_field?.trim()).length,
-    not_proposed: mappings.filter((m) => m.status === "not_proposed").length,
-    needs_review: mappings.filter(
-      (m) => m.status === "needs_review" || m.status === "unmatched",
-    ).length,
-  };
-}
+const SOURCE_FIELD_SELECT_CLASS =
+  "h-9 flex-1 min-w-0 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--primary)] transition-colors";
 
 function MappingReviewCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
-  const mappings: MappingField[] = payload.mappings ?? [];
-  const destOptions = buildDestinationOptions(payload.destination_fields ?? [], mappings);
-  const hasSchemaOptions = (payload.destination_fields ?? []).length > 0;
-  const [overrides, setOverrides] = useState<Record<string, RowOverride>>({});
-  const [globalReason, setGlobalReason] = useState("");
+  const destinations = (payload.destinations ?? []) as MappingDestination[];
+  const rows = (payload.rows ?? []) as MappingReviewRow[];
+  const sourceFields = (payload.source_fields ?? []) as string[];
+  const isSingle = destinations.length <= 1;
+  const dest = destinations[0];
 
-  const summary = payload.mapping_summary ?? computeMappingSummary(mappings);
-  const needsReview = mappings.filter(
-    (m) => m.status === "needs_review" || m.status === "unmatched",
-  );
+  // Track user-overridden source fields per row index
+  const [sourceOverrides, setSourceOverrides] = useState<Record<number, string>>({});
 
-  function setDest(sourceField: string, dest: string) {
-    setOverrides((prev) => ({
-      ...prev,
-      [sourceField]: {
-        destination_field: dest,
-        status:
-          dest !== (mappings.find((m) => m.source_field === sourceField)?.destination_field ?? "")
-            ? "human_corrected"
-            : "human_approved",
-      },
+  function getSourceField(row: MappingReviewRow, i: number) {
+    return sourceOverrides[i] ?? row.source_field;
+  }
+
+  const needsAction = rows.reduce((n, row) => {
+    return n + Object.values(row.cells ?? {}).filter(
+      (c) => c.status === "needs_input" || c.status === "missing",
+    ).length;
+  }, 0);
+
+  function handleApprove() {
+    const updatedRows = rows.map((row, i) => ({
+      ...row,
+      source_field: getSourceField(row, i),
     }));
+    onApprove({ approved: true, rows: updatedRows });
   }
 
-  function shouldIncludeInReview(m: MappingField): boolean {
-    const ov = overrides[m.source_field];
-    if (m.status === "needs_review" || m.status === "unmatched") return true;
-    if (!ov) return false;
-    if (m.status === "not_proposed") {
-      return (ov.destination_field?.trim() ?? "") !== "";
+  // Shared source field dropdown
+  function SourceDropdown({ row, index }: { row: MappingReviewRow; index: number }) {
+    const value = getSourceField(row, index);
+    if (sourceFields.length === 0) {
+      // No options provided — read-only pill
+      return (
+        <div className="h-9 flex-1 flex items-center px-3 rounded-lg border border-[var(--border)] bg-[var(--background)] text-sm text-[var(--foreground)] min-w-0 truncate">
+          {value}
+        </div>
+      );
     }
-    return true;
-  }
-
-  function handleApproveAll() {
-    const reviews = mappings
-      .filter(shouldIncludeInReview)
-      .map((m) => ({
-        source_field: m.source_field,
-        destination_field:
-          overrides[m.source_field]?.destination_field ?? m.destination_field ?? "",
-        status: overrides[m.source_field]?.status ?? "human_approved",
-      }));
-    onApprove({ approved: true, reviews, reason: globalReason.trim() || undefined });
+    return (
+      <select
+        value={value}
+        onChange={(e) => setSourceOverrides((prev) => ({ ...prev, [index]: e.target.value }))}
+        className={SOURCE_FIELD_SELECT_CLASS}
+      >
+        {!sourceFields.includes(value) && (
+          <option value={value}>{value}</option>
+        )}
+        {sourceFields.map((f) => (
+          <option key={f} value={f}>{f}</option>
+        ))}
+      </select>
+    );
   }
 
   return (
-    <Card className="border-blue-500/40 bg-blue-500/5 w-full">
-      <CardContent className="p-4 space-y-4">
-        <div>
-          <p className="text-sm font-semibold text-[var(--foreground)]">Field mapping review</p>
-          <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-            <span className="font-medium">{payload.source_object}</span>
-            {" → "}
-            <span className="font-medium">{payload.destination_type}</span>
-            {" · "}
-            {payload.mapping_kind === "canonical" ? "Stage 1: canonical" : "Stage 2: projection"}
-          </p>
-          <p className="text-xs text-[var(--muted-foreground)] mt-1">
-            {summary.total_source_fields} source fields · {summary.mapped} mapped ·{" "}
-            {summary.not_proposed} not mapped by agent
-            {summary.needs_review > 0 && ` · ${summary.needs_review} need review`}
-          </p>
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-3">
+        {/* Header label */}
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          {payload.source_object}
+          {isSingle && dest ? ` → ${dest.label}` : ""}
+        </p>
+
+        {isSingle ? (
+          // ── Single destination: source dropdown → dest pill + dot ──────────
+          <div className="space-y-2">
+            {rows.map((row, i) => {
+              const cell = dest ? row.cells[dest.id] : Object.values(row.cells)[0];
+              return (
+                <div key={i} className="flex items-center gap-2">
+                  <SourceDropdown row={row} index={i} />
+                  <span className="text-[var(--muted-foreground)] text-xs shrink-0">→</span>
+                  <div className="flex-1 flex items-center h-9 px-3 rounded-lg border border-[var(--border)] bg-[var(--background)] text-sm text-[var(--foreground)] min-w-0 truncate">
+                    {cell?.field ?? "—"}
+                  </div>
+                  <MappingStatusDot status={cell?.status ?? ""} />
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          // ── Multi destination: grid table with source dropdowns ────────────
+          <div className="rounded-lg border border-[var(--border)] overflow-hidden">
+            <div
+              className="grid border-b border-[var(--border)] bg-[var(--secondary)]"
+              style={{ gridTemplateColumns: `1.2fr ${destinations.map(() => "1fr").join(" ")}` }}
+            >
+              <div className="px-3 py-2 text-xs font-medium text-[var(--muted-foreground)]">
+                {payload.source_object ?? "Source field"}
+              </div>
+              {destinations.map((d) => (
+                <div key={d.id} className="px-3 py-2 flex items-center gap-1.5 border-l border-[var(--border)]">
+                  <span
+                    className="h-3.5 w-3.5 rounded-sm shrink-0"
+                    style={{ backgroundColor: d.color ?? PLATFORM_COLORS[d.id] ?? "#888" }}
+                  />
+                  <span className="text-xs font-medium text-[var(--foreground)] truncate">{d.label}</span>
+                </div>
+              ))}
+            </div>
+            {rows.map((row, i) => (
+              <div
+                key={i}
+                className="grid border-b border-[var(--border)] last:border-0 hover:bg-[var(--secondary)]/40 transition-colors"
+                style={{ gridTemplateColumns: `1.2fr ${destinations.map(() => "1fr").join(" ")}` }}
+              >
+                <div className="px-3 py-2.5">
+                  <SourceDropdown row={row} index={i} />
+                </div>
+                {destinations.map((d) => {
+                  const cell = row.cells[d.id];
+                  const isNotRequired = !cell || cell.status === "not_required";
+                  return (
+                    <div key={d.id} className="px-3 py-2.5 flex items-center gap-2 border-l border-[var(--border)]">
+                      {isNotRequired ? (
+                        <span className="text-xs text-[var(--muted-foreground)]/60 italic">— not required —</span>
+                      ) : (
+                        <>
+                          <MappingStatusDot status={cell.status} />
+                          <span className="text-sm text-[var(--foreground)] truncate">{cell.field ?? "—"}</span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Legend */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {[
+            { color: "bg-green-500", label: "mapped & confident" },
+            { color: "bg-amber-500", label: "needs your input" },
+            { color: "bg-red-500",   label: "missing" },
+          ].map(({ color, label }) => (
+            <span key={label} className="flex items-center gap-1 text-[10px] font-medium tracking-wider text-[var(--muted-foreground)] uppercase">
+              <span className={`h-2 w-2 rounded-full ${color}`} />
+              {label}
+            </span>
+          ))}
+          {!isSingle && (
+            <span className="text-[10px] text-[var(--muted-foreground)]">
+              · Shared rows map once → all destinations
+            </span>
+          )}
         </div>
 
-        <div className="rounded-md border border-[var(--border)] text-xs overflow-hidden">
-          <div
-            className="max-h-[50vh] overflow-y-auto overflow-x-auto overscroll-contain [scrollbar-gutter:stable]"
-            role="region"
-            aria-label="Field mappings table"
-          >
-            <table className="w-full min-w-[32rem] table-fixed">
-              <thead className="sticky top-0 z-10">
-                <tr className="bg-[var(--secondary)] border-b border-[var(--border)] shadow-[0_1px_0_0_var(--border)]">
-                  <th className="w-[22%] text-left px-3 py-2 font-medium text-[var(--muted-foreground)]">Source field</th>
-                  <th className="w-[38%] text-left px-3 py-2 font-medium text-[var(--muted-foreground)]">Destination field</th>
-                  <th className="w-[18%] text-left px-3 py-2 font-medium text-[var(--muted-foreground)]">Confidence</th>
-                  <th className="w-[22%] text-left px-3 py-2 font-medium text-[var(--muted-foreground)]">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mappings.map((m) => {
-                  const ov = overrides[m.source_field];
-                  const currentDest = ov?.destination_field ?? m.destination_field ?? "";
-                  return (
-                    <tr
-                      key={m.source_field}
-                      className="border-b border-[var(--border)] last:border-0 hover:bg-[var(--secondary)]/50"
-                    >
-                      <td className="px-3 py-2 font-mono text-[var(--foreground)] truncate" title={m.source_field}>
-                        {m.source_field}
-                      </td>
-                      <td className="px-3 py-2 max-w-0">
-                      {hasSchemaOptions ? (
-                        <select
-                          value={currentDest}
-                          onChange={(e) => setDest(m.source_field, e.target.value)}
-                          className={SELECT_CLASS}
-                        >
-                          <option value="">Select destination field</option>
-                          {destOptions.map((f) => (
-                            <option key={f.name} value={f.name}>
-                              {f.label ?? f.name}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <Input
-                          value={currentDest}
-                          onChange={(e) => setDest(m.source_field, e.target.value)}
-                          placeholder="Enter destination field…"
-                          className="h-6 text-xs py-0 px-2"
-                        />
-                      )}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      <ConfidenceBadge value={m.confidence} />
-                    </td>
-                    <td className="px-3 py-2 text-[var(--muted-foreground)] whitespace-nowrap">
-                      {formatMappingStatus(m.status)}
-                    </td>
-                  </tr>
-                );
-              })}
-              </tbody>
-            </table>
+        {/* Actions */}
+        <div className="flex gap-2">
+          <Button type="button" className="flex-1" onClick={handleApprove}>
+            {needsAction > 0 ? `Resolve ${needsAction} field${needsAction !== 1 ? "s" : ""}` : "Approve mapping"}
+          </Button>
+          <Button type="button" variant="outline" className="flex-1" onClick={() => onReject("edit_mapping")}>
+            Edit mapping
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Canonical mapping card ──────────────────────────────────────────────────
+
+function CanonicalMappingCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const rows = (payload.canonical_rows ?? []) as CanonicalMappingRow[];
+  const infoText = payload.info_text;
+
+  const needsInput = rows.filter(
+    (r) => r.status === "needs_input" || r.status === "missing",
+  ).length;
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-3">
+        {/* Header label */}
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          What Signals needs ← Your Salesforce field
+        </p>
+
+        {/* Rows */}
+        <div className="space-y-2">
+          {rows.map((row, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-3 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2.5"
+            >
+              <MappingStatusDot status={row.status} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-[var(--foreground)] leading-tight">
+                  {row.canonical_field}
+                </p>
+                {row.description && (
+                  <p className={`text-xs mt-0.5 leading-tight ${
+                    row.status === "needs_input" || row.status === "missing"
+                      ? "text-amber-600 dark:text-amber-400"
+                      : "text-[var(--muted-foreground)]"
+                  }`}>
+                    {row.description}
+                  </p>
+                )}
+              </div>
+              <span className="text-[var(--muted-foreground)] text-xs shrink-0">←</span>
+              <div className="w-44 shrink-0 flex items-center h-8 px-2.5 rounded-md border border-[var(--border)] bg-[var(--card)] text-sm text-[var(--foreground)] truncate">
+                {row.source_field ?? (
+                  <span className="text-[var(--muted-foreground)] italic text-xs">not mapped</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Info bar */}
+        {infoText && (
+          <div className="rounded-lg border border-blue-200 dark:border-blue-800/60 bg-blue-500/5 px-3 py-2">
+            <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">{infoText}</p>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-2">
+          {needsInput > 0 ? (
+            <>
+              <Button type="button" className="flex-1" onClick={() => onApprove({ approved: true })}>
+                Resolve {needsInput} hint{needsInput !== 1 ? "s" : ""}
+              </Button>
+              <Button type="button" variant="outline" className="flex-1" onClick={() => onApprove({ approved: true, skip_hints: true })}>
+                Looks good — validate
+              </Button>
+            </>
+          ) : (
+            <Button type="button" className="flex-1" onClick={() => onApprove({ approved: true })}>
+              Looks good — validate
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Check & connect source card ───────────────────────────────────────────
+
+type ConnectionStatusConfig = {
+  bar: string;
+  tint: string;
+  primaryBtn: string;
+  secondaryLabel: string;
+};
+
+const CONNECTION_STATUS: Record<string, ConnectionStatusConfig> = {
+  not_connected: {
+    bar:         "bg-red-500",
+    tint:        "bg-red-500/[0.03]",
+    primaryBtn:  "",
+    secondaryLabel: "Use a different source",
+  },
+  expired: {
+    bar:         "bg-amber-500",
+    tint:        "bg-amber-500/[0.03]",
+    primaryBtn:  "bg-amber-500 hover:bg-amber-600 text-white border-amber-500",
+    secondaryLabel: "Use a different source",
+  },
+  connected: {
+    bar:         "bg-green-500",
+    tint:        "bg-green-500/[0.03]",
+    primaryBtn:  "bg-green-600 hover:bg-green-700 text-white border-green-600",
+    secondaryLabel: "Use a different source",
+  },
+};
+
+function CheckConnectionCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
+  const status = payload.connection_status ?? "not_connected";
+  const cfg = CONNECTION_STATUS[status] ?? CONNECTION_STATUS.not_connected;
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-3">
+        {/* Info block with status-coloured left border */}
+        <div className="flex rounded-md border border-[var(--border)]/60 overflow-hidden mb-3">
+          <div className={`w-1 shrink-0 ${cfg.bar}`} />
+          <div className={`px-4 py-3 space-y-0.5 flex-1 ${cfg.tint}`}>
+            <p className="text-sm font-semibold text-[var(--foreground)]">
+              {payload.source_label ?? payload.title ?? "Source"}
+            </p>
+            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
+              {payload.message ?? "No active connection found. I'll open the secure connect screen — your credentials stay on the existing authentication flow."}
+            </p>
           </div>
         </div>
 
-        <p className="text-xs text-amber-600 dark:text-amber-400">
-          All {summary.total_source_fields} source fields are listed. Change any destination via the
-          {hasSchemaOptions ? " dropdown" : " input"} to map it.
-          {needsReview.length > 0 && (
-            <>
-              {" "}
-              {needsReview.length} field{needsReview.length !== 1 ? "s" : ""} need review — leave unmapped
-              fields empty if you do not want them stored.
-            </>
-          )}
+        {/* Actions */}
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            className={`flex-1 ${cfg.primaryBtn}`}
+            onClick={() => onApprove({ action: "connect" })}
+          >
+            Connect {payload.source_label ?? "Source"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1"
+            onClick={() => onReject("change_source")}
+          >
+            {cfg.secondaryLabel}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Select channels card (multi-select) ───────────────────────────────────
+
+function SelectChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const options = (payload.options ?? []) as SelectOption[];
+  const min = payload.min_select ?? 1;
+
+  const defaultSelected = options
+    .filter((o) => o.enabled !== false && o.id === payload.default_selected)
+    .map((o) => o.id);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set(defaultSelected));
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  const canContinue = selected.size >= min;
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-4">
+        <InterruptHeader payload={payload} />
+
+        <div className="flex flex-wrap gap-2">
+          {options.map((opt) => {
+            const isEnabled = opt.enabled !== false;
+            const isSelected = selected.has(opt.id);
+
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                disabled={!isEnabled}
+                onClick={() => isEnabled && toggle(opt.id)}
+                style={{ borderRadius: isSelected ? "8px" : "9999px" }}
+                className={[
+                  "inline-flex items-center gap-2 border px-3 py-1.5 text-sm font-medium",
+                  "transition-all duration-300 ease-in-out",
+                  isEnabled ? "cursor-pointer" : "cursor-not-allowed opacity-35",
+                  isSelected
+                    ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                    : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/40 hover:bg-[var(--secondary)]",
+                ].join(" ")}
+              >
+                {/* Checkbox indicator */}
+                <span className={[
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border text-[10px]",
+                  isSelected
+                    ? "border-[var(--primary)] bg-[var(--primary)] text-white"
+                    : "border-[var(--muted-foreground)]/50 bg-transparent text-transparent",
+                ].join(" ")}>
+                  ✓
+                </span>
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {selected.size > 0 && (
+          <p className="text-xs text-[var(--muted-foreground)]">
+            {selected.size} selected
+          </p>
+        )}
+
+        <Button
+          type="button"
+          disabled={!canContinue}
+          onClick={() => onApprove({ selected: Array.from(selected) })}
+          className="w-full"
+        >
+          Continue{selected.size > 0 ? ` with ${selected.size} channel${selected.size !== 1 ? "s" : ""}` : ""}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Resolve fields card ────────────────────────────────────────────────────
+
+function ResolveFieldsCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
+  const isResolved = payload.resolve_status === "resolved";
+  const fields = (payload.unresolved_fields ?? []) as UnresolvedField[];
+  const sourceFields = (payload.source_fields ?? []) as string[];
+  const destinationLabel = payload.destination_label ?? "destination";
+
+  // Track which fields are in "map a field" mode
+  const [mappingField, setMappingField] = useState<string | null>(null);
+  const [fieldMaps, setFieldMaps] = useState<Record<string, string>>({});
+
+  const inlineChip = (label: string, onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center rounded border border-[var(--border)] bg-[var(--background)] px-2 py-0.5 text-xs text-[var(--foreground)] hover:bg-[var(--secondary)] transition-colors cursor-pointer"
+    >
+      {label}
+    </button>
+  );
+
+  // ── Resolved state ────────────────────────────────────────────────────────
+  if (isResolved) {
+    return (
+      <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+        <CardContent className="p-3">
+          <div className="flex rounded-md border border-[var(--border)]/60 overflow-hidden mb-3">
+            <div className="w-1 shrink-0 bg-green-500" />
+            <div className="px-4 py-3 space-y-0.5 flex-1 bg-green-500/[0.03]">
+              <p className="text-sm font-semibold text-[var(--foreground)]">
+                All required {destinationLabel} fields resolved
+              </p>
+              {payload.summary_text && (
+                <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
+                  {payload.summary_text}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button type="button" className="flex-1" onClick={() => onApprove({ action: "confirm" })}>
+              Confirm mapping
+            </Button>
+            <Button type="button" variant="outline" className="flex-1" onClick={() => onReject("edit")}>
+              Edit a field
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // ── Has issues state ──────────────────────────────────────────────────────
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-3 space-y-2">
+        {fields.map((f) => (
+          <div key={f.field} className="flex rounded-md border border-[var(--border)]/60 overflow-hidden">
+            <div className="w-1 shrink-0 bg-amber-500" />
+            <div className="px-4 py-3 space-y-2 flex-1 bg-amber-500/[0.03]">
+              <p className="text-sm font-semibold text-[var(--foreground)]">
+                {f.field}
+                <span className="ml-1.5 text-xs font-normal text-amber-600 dark:text-amber-400">
+                  ({f.required ? "required" : "optional"}, unmapped)
+                </span>
+              </p>
+
+              {/* Inline action chips */}
+              {mappingField !== f.field ? (
+                <div className="flex flex-wrap gap-2">
+                  {f.suggested_constant && inlineChip(
+                    `Set constant: ${f.suggested_constant}`,
+                    () => onApprove({ action: "set_constant", field: f.field, value: f.suggested_constant }),
+                  )}
+                  {inlineChip("Map a field", () => setMappingField(f.field))}
+                </div>
+              ) : (
+                // Inline field picker
+                <div className="flex items-center gap-2">
+                  <select
+                    autoFocus
+                    defaultValue=""
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      setFieldMaps((prev) => ({ ...prev, [f.field]: e.target.value }));
+                      onApprove({ action: "map_field", field: f.field, source_field: e.target.value });
+                    }}
+                    className="flex-1 h-8 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 text-sm text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  >
+                    <option value="" disabled>Select a field…</option>
+                    {sourceFields.map((sf) => (
+                      <option key={sf} value={sf}>{sf}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setMappingField(null)}
+                    className="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Check & connect channels card ─────────────────────────────────────────
+
+const CHANNEL_AVATAR_COLORS: Record<string, string> = {
+  meta:           "#1877F2",
+  meta_capi:      "#1877F2",
+  google:         "#EA4335",
+  google_offline: "#EA4335",
+  google_dm:      "#FBBC04",
+  tiktok:         "#010101",
+  snapchat:       "#FFFC00",
+  linkedin:       "#0A66C2",
+  twitter:        "#1DA1F2",
+  bing:           "#008373",
+};
+
+function CheckChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const channels = (payload.channels ?? []) as ChannelConnectionStatus[];
+  // First channel that still needs connecting
+  const pendingChannel = channels.find((ch) => ch.status !== "connected");
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-4">
+        {/* Section label */}
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Destinations for this integration
         </p>
 
-        <Input
-          placeholder="Optional note…"
-          value={globalReason}
-          onChange={(e) => setGlobalReason(e.target.value)}
-          className="text-sm"
-        />
+        {/* Channel rows */}
+        <div className="space-y-2">
+          {channels.map((ch) => {
+            const isConnected = ch.status === "connected";
+            const avatarColor = CHANNEL_AVATAR_COLORS[ch.id] ?? "#6B7280";
+            const initial = ch.label.charAt(0).toUpperCase();
 
-        <div className="flex gap-2">
-          <Button type="button" onClick={handleApproveAll}>
-            Approve all
+            return (
+              <div
+                key={ch.id}
+                className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3"
+              >
+                {/* Platform avatar */}
+                <div
+                  className="h-9 w-9 shrink-0 rounded-lg flex items-center justify-center text-white text-sm font-bold"
+                  style={{ backgroundColor: avatarColor }}
+                >
+                  {initial}
+                </div>
+
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[var(--foreground)]">{ch.label}</p>
+                  {ch.detail ? (
+                    <p className="text-xs text-[var(--muted-foreground)] truncate">{ch.detail}</p>
+                  ) : null}
+                </div>
+
+                {/* Status badge or inline Connect */}
+                {isConnected ? (
+                  <span className="shrink-0 rounded-full border border-green-500 px-3 py-1 text-xs font-medium text-green-600 dark:text-green-400">
+                    Connected
+                  </span>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => onApprove({ action: "connect", platform_id: ch.id })}
+                  >
+                    Connect
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Primary CTA */}
+        {pendingChannel ? (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              className="flex-1"
+              onClick={() => onApprove({ action: "connect", platform_id: pendingChannel.id })}
+            >
+              Connect {pendingChannel.label}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => onApprove({ action: "skip", platform_id: pendingChannel.id })}
+            >
+              Skip for now
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            className="w-full bg-green-600 hover:bg-green-700 text-white"
+            onClick={() => onApprove({ action: "confirm_all" })}
+          >
+            All connected — continue
           </Button>
-          <Button type="button" variant="outline" onClick={() => onReject(globalReason.trim() || undefined)}>
-            Reject
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Activate confirm card ─────────────────────────────────────────────────
+
+function ActivateConfirmCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
+  const validation   = payload.validation   as { title: string; checks: string[] } | undefined;
+  const summaryCard  = payload.summary_card as { title: string; lines: string[]  } | undefined;
+  const confirmLabel   = payload.confirm_label   ?? "Activate";
+  const secondaryLabel = payload.secondary_label ?? "Review matrix";
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-3">
+        {/* Validation block — green left border */}
+        {validation ? (
+          <div className="flex rounded-md border border-[var(--border)]/60 overflow-hidden">
+            <div className="w-1 shrink-0 bg-green-500" />
+            <div className="px-4 py-3 flex-1 space-y-1 bg-green-500/[0.03]">
+              <p className="text-sm font-semibold text-[var(--foreground)]">{validation.title}</p>
+              {validation.checks.map((check, i) => (
+                <p key={i} className="text-sm text-[var(--muted-foreground)]">{check}</p>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Summary card — plain border */}
+        {summaryCard ? (
+          <div className="rounded-md border border-[var(--border)] px-4 py-3 space-y-1">
+            <p className="text-sm font-semibold text-[var(--foreground)]">{summaryCard.title}</p>
+            {summaryCard.lines.map((line, i) => (
+              <p key={i} className="text-sm text-[var(--muted-foreground)]">{line}</p>
+            ))}
+          </div>
+        ) : null}
+
+        {/* CTA */}
+        <div className="flex gap-2 pt-1">
+          <Button
+            type="button"
+            className="flex-1"
+            onClick={() => onApprove({ action: "activate" })}
+          >
+            {confirmLabel}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1"
+            onClick={() => onReject("review_matrix")}
+          >
+            {secondaryLabel}
           </Button>
         </div>
       </CardContent>
@@ -476,15 +896,26 @@ export function HitlApprovalCard(props: HitlApprovalCardProps) {
   const cardProps = { ...props, payload };
 
   switch (payload.type) {
+    // ── Agreed interrupt sequence ──────────────────────────────────────────
+    case "select_channels":
+      return <SelectChannelsCard {...cardProps} />;
     case "select_source":
       return <SelectSourceCard {...cardProps} />;
+    case "check_connection":
+      return <CheckConnectionCard {...cardProps} />;
     case "select_object":
       return <SelectObjectCard {...cardProps} />;
-    case "select_destination":
-      return <SelectDestinationCard {...cardProps} />;
+    case "check_channels":
+      return <CheckChannelsCard {...cardProps} />;
     case "mapping_review":
       return <MappingReviewCard {...cardProps} />;
+    case "canonical_mapping":
+      return <CanonicalMappingCard {...cardProps} />;
+    case "resolve_fields":
+      return <ResolveFieldsCard {...cardProps} />;
+    case "activate_confirm":
+      return <ActivateConfirmCard {...cardProps} />;
     default:
-      return <GenericApprovalCard {...cardProps} />;
+      return null;
   }
 }

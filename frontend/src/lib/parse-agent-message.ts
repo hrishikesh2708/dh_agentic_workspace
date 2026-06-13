@@ -20,15 +20,14 @@ export type MappingCompleteMessage = {
 
 export type IntentAckMessage = {
   type: "intent_ack";
-  message: string;
-  complete?: boolean;
-  subtitle?: string;
-  source?: string;
-  source_label?: string;
-  source_object?: string;
+  // What the agent detected — shown as "DETECTED" chips
+  run_mode?: string;        // e.g. "Offline conversion" → chip "Type: Offline conversion"
+  source_label?: string;    // e.g. "Salesforce"         → chip "Source: Salesforce"
+  source_object?: string;   // e.g. "Opportunity"        → chip "Opportunity"
+  destinations?: string[];  // e.g. ["Meta", "Google"]   → one chip each
+  destination_label?: string; // fallback if no destinations array
   destination_type?: string;
-  destination_label?: string;
-  run_mode?: string;
+  source?: string;
   phase?: string;
 };
 
@@ -49,6 +48,50 @@ export type AgentEventMessage = {
   run_mode?: string;
 };
 
+export type ThinkingMessage = {
+  type: "thinking";
+  message: string;        // "Analyzing your Salesforce schema…"
+  step?: number;
+  total_steps?: number;
+};
+
+export type StepCompleteMessage = {
+  type: "step_complete";
+  message: string;        // "Meta + Google selected as destinations"
+  detail?: string;
+};
+
+export type SchemaSummaryMessage = {
+  type: "schema_summary";
+  source_label: string;
+  source_object: string;
+  total_fields: number;
+  required_fields: number;
+  sample_fields?: string[];
+};
+
+export type PipelineActivatedMessage = {
+  type: "pipeline_activated";
+  pipeline_name?: string;
+  source_label: string;
+  source_object: string;
+  destinations: string[];
+  total_fields: number;
+  mapped_fields: number;
+};
+
+export type ErrorMessage = {
+  type: "error";
+  title: string;
+  message: string;
+};
+
+export type WarningMessage = {
+  type: "warning";
+  title: string;
+  message: string;
+};
+
 function isLeakedIntentParseJson(parsed: Record<string, unknown>): boolean {
   return (
     "source" in parsed &&
@@ -59,16 +102,11 @@ function isLeakedIntentParseJson(parsed: Record<string, unknown>): boolean {
 }
 
 function intentAckFromLeakedJson(parsed: Record<string, unknown>): IntentAckMessage {
-  const source = String(parsed.source ?? "");
-  const sourceObject = String(parsed.source_object ?? "");
-  const destinationType = String(parsed.destination ?? "");
-
   return {
     type: "intent_ack",
-    message: "I'll help you set up this data connection.",
-    source,
-    source_object: sourceObject,
-    destination_type: destinationType,
+    source: String(parsed.source ?? ""),
+    source_object: String(parsed.source_object ?? ""),
+    destination_type: String(parsed.destination ?? ""),
   };
 }
 
@@ -76,7 +114,13 @@ export type ParsedAgentMessage =
   | { kind: "text"; text: string }
   | { kind: "mapping_complete"; data: MappingCompleteMessage }
   | { kind: "intent_ack"; data: IntentAckMessage }
-  | { kind: "agent_event"; data: AgentEventMessage };
+  | { kind: "agent_event"; data: AgentEventMessage }
+  | { kind: "thinking"; data: ThinkingMessage }
+  | { kind: "step_complete"; data: StepCompleteMessage }
+  | { kind: "schema_summary"; data: SchemaSummaryMessage }
+  | { kind: "pipeline_activated"; data: PipelineActivatedMessage }
+  | { kind: "error"; data: ErrorMessage }
+  | { kind: "warning"; data: WarningMessage };
 
 export function extractMessageText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -114,6 +158,30 @@ export function parseAgentMessage(content: unknown): ParsedAgentMessage {
 
     if (obj.type === "agent_event") {
       return { kind: "agent_event", data: parsed as AgentEventMessage };
+    }
+
+    if (obj.type === "thinking") {
+      return { kind: "thinking", data: parsed as ThinkingMessage };
+    }
+
+    if (obj.type === "step_complete") {
+      return { kind: "step_complete", data: parsed as StepCompleteMessage };
+    }
+
+    if (obj.type === "schema_summary") {
+      return { kind: "schema_summary", data: parsed as SchemaSummaryMessage };
+    }
+
+    if (obj.type === "pipeline_activated") {
+      return { kind: "pipeline_activated", data: parsed as PipelineActivatedMessage };
+    }
+
+    if (obj.type === "error") {
+      return { kind: "error", data: parsed as ErrorMessage };
+    }
+
+    if (obj.type === "warning") {
+      return { kind: "warning", data: parsed as WarningMessage };
     }
 
     if (isLeakedIntentParseJson(obj)) {
@@ -169,7 +237,7 @@ export function isRedundantConfirmedEvent(
 
   for (const content of priorAssistantContents) {
     const parsed = parseAgentMessage(content);
-    if (parsed.kind !== "intent_ack" || parsed.data.complete) continue;
+    if (parsed.kind !== "intent_ack") continue;
     const ack = parsed.data;
     if (
       event.step === "source" &&
