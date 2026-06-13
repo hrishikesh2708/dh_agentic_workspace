@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { decodeJwt } from "jose";
 
 import { parseApiErrorBody } from "@/lib/api-errors";
-import { JWT_COOKIE, JWT_PUB_COOKIE } from "@/lib/auth";
+import { JWT_COOKIE } from "@/lib/auth";
 
 const BACKEND_URL =
   process.env.BACKEND_URL ??
@@ -93,20 +93,13 @@ export async function POST(request: Request) {
 
   const isProd = process.env.NODE_ENV === "production";
   const response = NextResponse.json({ success: true });
-  const cookieOpts = {
-    path: "/" as const,
-    sameSite: "lax" as const,
-    secure: isProd,
-    maxAge,
-  };
 
   response.cookies.set(JWT_COOKIE, token.access_token, {
-    ...cookieOpts,
+    path: "/",
+    sameSite: "lax",
+    secure: isProd,
     httpOnly: true,
-  });
-  response.cookies.set(JWT_PUB_COOKIE, token.access_token, {
-    ...cookieOpts,
-    httpOnly: false,
+    maxAge,
   });
 
   return response;

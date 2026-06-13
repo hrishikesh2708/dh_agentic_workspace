@@ -1,11 +1,11 @@
 "use client";
 
-import { AgentMessageBubble } from "@/components/chat/agent-message-bubble";
-import { ChatErrorBoundary } from "@/components/chat/chat-error-boundary";
-import { HitlApprovalCard } from "@/components/chat/hitl-approval-card";
+import { AgentMessageBubble } from "./messages/agent-message-bubble";
+import { ChatErrorBoundary } from "./chat-error-boundary";
+import { HitlApprovalCard } from "./interrupts/hitl-approval-card";
 import { Spinner } from "@/components/ui/spinner";
-import { useProject } from "@/components/chat/project-context";
-import { CopilotChatLayout } from "@/components/chat/copilot-chat-layout";
+import { useProject } from "@/components/project/project-context";
+import { CopilotChatLayout } from "./copilot-chat-layout";
 import { useHeadlessInterrupt } from "@/hooks/use-headless-interrupt";
 import { CHAT_AGENT_ID } from "@/lib/chat-constants";
 import { extractMessageText } from "@/lib/parse-agent-message";

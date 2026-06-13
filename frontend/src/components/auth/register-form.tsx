@@ -98,15 +98,11 @@ export function RegisterForm() {
 
     setSubmitting(true);
     try {
-      await apiClient.post<UserResponse>(
-        "/auth/register",
-        {
-          email: email.trim(),
-          password,
-          username: username.trim() || undefined,
-        },
-        { noAuth: true },
-      );
+      await apiClient.post<UserResponse>("/auth/register", {
+        email: email.trim(),
+        password,
+        username: username.trim() || undefined,
+      });
       await login(email.trim(), password);
       router.push("/chat");
     } catch (err) {

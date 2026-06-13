@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 
-import { ThemeToggle } from "@/components/theme-toggle";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuth } from "@/hooks/use-auth";

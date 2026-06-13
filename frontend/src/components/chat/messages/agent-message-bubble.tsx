@@ -1,8 +1,8 @@
 "use client";
 
-import { AgentEventLine } from "@/components/chat/agent-event-line";
-import { IntentAckCard } from "@/components/chat/intent-ack-card";
-import { MappingResultCard } from "@/components/chat/mapping-result-card";
+import { AgentEventLine } from "./agent-event-line";
+import { IntentAckCard } from "../interrupts/intent-ack-card";
+import { MappingResultCard } from "./mapping-result-card";
 import {
   isRedundantConfirmedEvent,
   parseAgentMessage,

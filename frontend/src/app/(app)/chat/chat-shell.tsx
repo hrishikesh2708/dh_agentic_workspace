@@ -1,20 +1,19 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 import { ChatProviders } from "@/app/(app)/chat/providers";
 import {
   CopilotChatLayout,
   CopilotOfflineBanner,
 } from "@/components/chat/copilot-chat-layout";
 import { HeadlessChat } from "@/components/chat/headless-chat";
-import { ProjectPickerDialog } from "@/components/chat/project-picker-dialog";
-import { ProjectProvider } from "@/components/chat/project-context";
+import { ProjectProvider } from "@/components/project/project-context";
 import { Spinner } from "@/components/ui/spinner";
 import { apiClient, ApiError } from "@/lib/api-client";
-import { loadStoredProject, storeProject } from "@/lib/project-storage";
-import type { ProjectRead } from "@/lib/types";
-import { useEffect, useState } from "react";
+import { loadStoredProject } from "@/lib/project-storage";
 
-/** Shape returned by ``POST /api/v1/auth/session`` (see backend ``app/schemas/auth.py``). */
+/** Shape returned by POST /api/v1/auth/session */
 interface SessionCreateResponse {
   session_id: string;
   name: string;
@@ -25,22 +24,22 @@ interface SessionCreateResponse {
   };
 }
 
-const CHAT_SESSION_STORAGE_KEY = "dh_chat_session";
+const SESSION_KEY = "dh_chat_session";
 
-interface StoredChatSession {
+interface StoredSession {
   session_id: string;
   access_token: string;
   expires_at: number;
 }
 
-function loadStoredSession(): StoredChatSession | null {
+function loadStoredSession(): StoredSession | null {
   if (typeof window === "undefined") return null;
-  const raw = window.sessionStorage.getItem(CHAT_SESSION_STORAGE_KEY);
+  const raw = window.sessionStorage.getItem(SESSION_KEY);
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as StoredChatSession;
-    if (parsed.expires_at && parsed.expires_at * 1000 < Date.now()) {
-      window.sessionStorage.removeItem(CHAT_SESSION_STORAGE_KEY);
+    const parsed = JSON.parse(raw) as StoredSession;
+    if (parsed.expires_at * 1000 < Date.now()) {
+      window.sessionStorage.removeItem(SESSION_KEY);
       return null;
     }
     return parsed;
@@ -49,58 +48,17 @@ function loadStoredSession(): StoredChatSession | null {
   }
 }
 
-function storeSession(session: StoredChatSession) {
+function storeSession(session: StoredSession) {
   if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(
-    CHAT_SESSION_STORAGE_KEY,
-    JSON.stringify(session),
-  );
-}
-
-function ChatPreviewShell({ message }: { message?: string }) {
-  return (
-    <CopilotChatLayout
-      inputDisabled
-      inputPlaceholder="Connect backend session to start chatting"
-      banner={
-        message ? (
-          <CopilotOfflineBanner message={message} />
-        ) : undefined
-      }
-    />
-  );
-}
-
-function ProjectGateShell({
-  onComplete,
-}: {
-  onComplete: (project: ProjectRead) => void;
-}) {
-  return (
-    <>
-      <CopilotChatLayout
-        inputDisabled
-        inputPlaceholder="Select a project to start chatting"
-        banner={
-          <p className="text-sm text-[var(--muted-foreground)]">
-            Choose or create a project workspace before Copilot can load your
-            connections and mappings.
-          </p>
-        }
-      />
-      <ProjectPickerDialog open onComplete={onComplete} />
-    </>
-  );
+  window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
 
 /**
- * Bootstraps a chat session token, then mounts the CopilotKit-backed
- * HeadlessChat. Falls back to the visible UI shell when the session or
- * agent runtime is not ready yet.
+ * Bootstraps a CopilotKit session token then mounts HeadlessChat.
+ * Project is guaranteed to exist by middleware (/chat redirects to /project if missing).
  */
 export function ChatShell() {
-  const [stored, setStored] = useState<StoredChatSession | null>(null);
-  const [activeProject, setActiveProject] = useState<ProjectRead | null>(null);
+  const [session, setSession] = useState<StoredSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,44 +69,28 @@ export function ChatShell() {
       try {
         const existing = loadStoredSession();
         if (existing) {
-          if (!cancelled) {
-            setStored(existing);
-            setActiveProject(loadStoredProject());
-            setLoading(false);
-          }
+          if (!cancelled) { setSession(existing); setLoading(false); }
           return;
         }
 
-        const created = await apiClient.post<SessionCreateResponse>(
-          "/auth/session",
-        );
-        const next: StoredChatSession = {
+        const created = await apiClient.post<SessionCreateResponse>("/auth/session");
+        const next: StoredSession = {
           session_id: created.session_id,
           access_token: created.token.access_token,
           expires_at: created.token.expires_at,
         };
         storeSession(next);
-        if (!cancelled) {
-          setStored(next);
-          setActiveProject(loadStoredProject());
-          setLoading(false);
-        }
+        if (!cancelled) { setSession(next); setLoading(false); }
       } catch (err) {
         if (cancelled) return;
-        if (err instanceof ApiError && err.status === 401) {
-          return;
-        }
-        const message =
-          err instanceof Error ? err.message : "session_create_failed";
-        setError(message);
+        if (err instanceof ApiError && err.status === 401) return;
+        setError(err instanceof Error ? err.message : "session_create_failed");
         setLoading(false);
       }
     }
 
     void bootstrap();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
   if (loading) {
@@ -165,31 +107,29 @@ export function ChatShell() {
     );
   }
 
-  if (error || !stored) {
+  if (error || !session) {
     return (
-      <ChatPreviewShell
-        message={`Session could not be created (${error ?? "unknown error"}). Check that the backend is running — the copilot UI is still available for layout work.`}
+      <CopilotChatLayout
+        inputDisabled
+        inputPlaceholder="Connect backend session to start chatting"
+        banner={
+          <CopilotOfflineBanner
+            message={`Session could not be created (${error ?? "unknown error"}). Check that the backend is running.`}
+          />
+        }
       />
     );
   }
 
-  if (!activeProject) {
-    return (
-      <ProjectGateShell
-        onComplete={(project) => {
-          storeProject(project);
-          setActiveProject(project);
-        }}
-      />
-    );
-  }
+  // Project is guaranteed by middleware — loadStoredProject() will always return a value here
+  const project = loadStoredProject()!;
 
   return (
-    <ProjectProvider initialProject={activeProject}>
-      <ChatProviders sessionToken={stored.access_token}>
+    <ProjectProvider project={project}>
+      <ChatProviders sessionToken={session.access_token}>
         <HeadlessChat
-          projectName={activeProject.name}
-          sessionId={stored.session_id}
+          projectName={project.name}
+          sessionId={session.session_id}
         />
       </ChatProviders>
     </ProjectProvider>

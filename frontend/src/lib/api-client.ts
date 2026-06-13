@@ -1,9 +1,4 @@
 import { parseApiErrorBody } from "./api-errors";
-import { JWT_PUB_COOKIE, readCookieFromDocument } from "./auth";
-
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-const API_PREFIX = "/api/v1";
 
 export class ApiError extends Error {
   status: number;
@@ -19,28 +14,26 @@ export class ApiError extends Error {
 
 interface ApiRequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
-  /** If provided, used directly as Bearer token instead of reading cookie. */
-  token?: string;
-  /** Skip Authorization header entirely (e.g. login). */
-  noAuth?: boolean;
 }
 
+/**
+ * All API calls go through Next.js BFF routes (/api/*).
+ * Paths like "/projects" become "/api/projects".
+ * The BFF reads the httpOnly JWT cookie and forwards it to FastAPI —
+ * the browser never touches the token or the backend URL directly.
+ */
 function buildUrl(path: string): string {
-  if (path.startsWith("http://") || path.startsWith("https://")) {
-    return path;
-  }
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
   const normalized = path.startsWith("/") ? path : `/${path}`;
-  if (normalized.startsWith("/api/")) {
-    return `${BACKEND_URL}${normalized}`;
-  }
-  return `${BACKEND_URL}${API_PREFIX}${normalized}`;
+  if (normalized.startsWith("/api/")) return normalized;
+  return `/api${normalized}`;
 }
 
 export async function apiFetch<T = unknown>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  const { body, token, noAuth, headers, ...rest } = options;
+  const { body, headers, ...rest } = options;
 
   const finalHeaders: Record<string, string> = {
     Accept: "application/json",
@@ -62,38 +55,24 @@ export async function apiFetch<T = unknown>(
     }
   }
 
-  if (!noAuth) {
-    const bearer = token ?? readCookieFromDocument(JWT_PUB_COOKIE);
-    if (bearer) {
-      finalHeaders.Authorization = `Bearer ${bearer}`;
-    }
-  }
-
   const res = await fetch(buildUrl(path), {
     ...rest,
     headers: finalHeaders,
     body: serializedBody,
-    credentials: "include",
+    credentials: "include", // sends httpOnly cookie to the Next.js BFF
   });
 
   if (res.status === 401 && typeof window !== "undefined") {
-    // Drop session and bounce to /login.
     window.location.href = "/login";
     throw new ApiError("unauthorized", 401, null);
   }
 
-  if (res.status === 204) {
-    return undefined as T;
-  }
+  if (res.status === 204) return undefined as T;
 
   const text = await res.text();
   let parsed: unknown = null;
   if (text) {
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      parsed = text;
-    }
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
   }
 
   if (!res.ok) {
@@ -107,21 +86,12 @@ export async function apiFetch<T = unknown>(
 export const apiClient = {
   get: <T = unknown>(path: string, options: ApiRequestOptions = {}) =>
     apiFetch<T>(path, { ...options, method: "GET" }),
-  post: <T = unknown>(
-    path: string,
-    body?: unknown,
-    options: ApiRequestOptions = {},
-  ) => apiFetch<T>(path, { ...options, method: "POST", body }),
-  put: <T = unknown>(
-    path: string,
-    body?: unknown,
-    options: ApiRequestOptions = {},
-  ) => apiFetch<T>(path, { ...options, method: "PUT", body }),
-  patch: <T = unknown>(
-    path: string,
-    body?: unknown,
-    options: ApiRequestOptions = {},
-  ) => apiFetch<T>(path, { ...options, method: "PATCH", body }),
+  post: <T = unknown>(path: string, body?: unknown, options: ApiRequestOptions = {}) =>
+    apiFetch<T>(path, { ...options, method: "POST", body }),
+  put: <T = unknown>(path: string, body?: unknown, options: ApiRequestOptions = {}) =>
+    apiFetch<T>(path, { ...options, method: "PUT", body }),
+  patch: <T = unknown>(path: string, body?: unknown, options: ApiRequestOptions = {}) =>
+    apiFetch<T>(path, { ...options, method: "PATCH", body }),
   delete: <T = unknown>(path: string, options: ApiRequestOptions = {}) =>
     apiFetch<T>(path, { ...options, method: "DELETE" }),
 };
