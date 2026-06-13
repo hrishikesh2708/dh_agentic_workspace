@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
-const JWT_COOKIE = "datahash_jwt";
-const JWT_PUB_COOKIE = "datahash_jwt_pub";
+import { JWT_COOKIE, JWT_PUB_COOKIE } from "@/lib/auth";
 
 export async function POST() {
   const response = NextResponse.json({ success: true });

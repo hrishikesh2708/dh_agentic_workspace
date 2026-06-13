@@ -1,17 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-const JWT_COOKIE = "datahash_jwt";
+import { JWT_COOKIE } from "@/lib/auth";
 
-const PROTECTED_PREFIXES = [
-  "/dashboard",
-  "/future-dashboard",
-  "/mappings",
-  "/runs",
-  "/golden-rules",
-  "/integrations",
-  "/chat",
-];
+const PROTECTED_PREFIXES = ["/chat"];
 
 function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some(
@@ -36,13 +28,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    "/dashboard/:path*",
-    "/future-dashboard/:path*",
-    "/mappings/:path*",
-    "/runs/:path*",
-    "/golden-rules/:path*",
-    "/integrations/:path*",
-    "/chat/:path*",
-  ],
+  matcher: ["/chat/:path*"],
 };

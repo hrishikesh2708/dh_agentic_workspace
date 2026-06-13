@@ -11,8 +11,6 @@ import { useShell } from "./shell-context";
 
 const NAV = [
   { href: "/chat", label: "Copilot" },
-  { href: "/integrations", label: "Integrations" },
-  { href: "/future-dashboard", label: "Future dashboard" },
 ] as const;
 
 export function ChatSidebar() {
@@ -75,7 +73,6 @@ export function ChatSidebar() {
         {NAV.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(`${item.href}/`);
-          const isPreview = item.href === "/future-dashboard";
 
           return (
             <Link
@@ -87,7 +84,6 @@ export function ChatSidebar() {
                 active
                   ? "bg-[var(--secondary)] font-medium text-[var(--secondary-foreground)]"
                   : "text-[var(--muted-foreground)] hover:bg-[var(--secondary)] hover:text-[var(--secondary-foreground)]",
-                isPreview && !active && "opacity-60",
                 sidebarCollapsed && "flex justify-center px-2",
               )}
             >

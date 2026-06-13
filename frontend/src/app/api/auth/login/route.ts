@@ -2,14 +2,12 @@ import { NextResponse } from "next/server";
 import { decodeJwt } from "jose";
 
 import { parseApiErrorBody } from "@/lib/api-errors";
+import { JWT_COOKIE, JWT_PUB_COOKIE } from "@/lib/auth";
 
 const BACKEND_URL =
   process.env.BACKEND_URL ??
   process.env.NEXT_PUBLIC_BACKEND_URL ??
   "http://localhost:8000";
-
-const JWT_COOKIE = "datahash_jwt";
-const JWT_PUB_COOKIE = "datahash_jwt_pub";
 
 interface LoginBody {
   email?: string;

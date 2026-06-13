@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 
-const JWT_COOKIE = "datahash_jwt";
+import { JWT_COOKIE } from "@/lib/auth";
 
 export default async function HomePage() {
   const store = await cookies();
