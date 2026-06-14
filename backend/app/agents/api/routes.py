@@ -186,9 +186,8 @@ async def copilotkit_endpoint(
     """
     langgraph_agent = _get_langgraph_agent(request)
 
-    # Stash session bookkeeping on request.state so any downstream code
-    # that wants ``customer_id`` (e.g. learning_worker.persist_session)
-    # can pull it from the runnable config in a future iteration.
+    # Stash session bookkeeping on request.state so downstream code
+    # can pull it from the runnable config.
     request.state.customer_id = session.user_id
     request.state.session_id = session.id
 

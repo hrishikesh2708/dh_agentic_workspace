@@ -15,7 +15,7 @@ from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.logging import logger
 from app.models.user import User
-from app.schemas.dashboard.project import (
+from app.schemas.project import (
     ProjectCreate,
     ProjectListResponse,
     ProjectRead,

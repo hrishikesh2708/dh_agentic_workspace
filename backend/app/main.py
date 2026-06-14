@@ -1,7 +1,8 @@
-"""This file contains the main application entry point."""
+"""Main application entry point."""
 
 from contextlib import asynccontextmanager
 from datetime import datetime
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from fastapi import (
@@ -12,15 +13,23 @@ from fastapi import (
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from psycopg import AsyncConnection
+from psycopg.rows import (
+    DictRow,
+    dict_row,
+)
+from psycopg_pool import AsyncConnectionPool
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from asgi_correlation_id import CorrelationIdMiddleware
 
 from app.api.v1.api import api_router
-from app.api.v1.chatbot import agent
 from app.core.cache import cache_service
-from app.core.config import settings
+from app.core.config import (
+    Environment,
+    settings,
+)
 from app.core.limiter import limiter
 from app.core.logging import logger
 from app.core.metrics import setup_metrics
@@ -31,16 +40,50 @@ from app.core.middleware import (
 )
 from app.core.observability import langsmith_init
 from app.services.database import database_service
-from app.services.memory import memory_service
 
 # Load environment variables
 load_dotenv()
 langsmith_init()
 
+# Module-level connection pool owned by main — shared with the datahash agent checkpointer
+_agent_conn_pool: AsyncConnectionPool[AsyncConnection[DictRow]] | None = None
+
+
+async def _create_agent_pool() -> AsyncConnectionPool[AsyncConnection[DictRow]] | None:
+    """Create the psycopg connection pool used by the datahash agent's Postgres checkpointer."""
+    try:
+        connection_url = (
+            "postgresql://"
+            f"{quote_plus(settings.POSTGRES_USER)}:{quote_plus(settings.POSTGRES_PASSWORD)}"
+            f"@{settings.POSTGRES_HOST}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+        )
+        pool: AsyncConnectionPool[AsyncConnection[DictRow]] = AsyncConnectionPool(
+            connection_url,
+            open=False,
+            max_size=settings.POSTGRES_POOL_SIZE,
+            kwargs={
+                "autocommit": True,
+                "connect_timeout": 5,
+                "prepare_threshold": None,
+                "row_factory": dict_row,
+            },
+        )
+        await pool.open()
+        logger.info("agent_connection_pool_created", max_size=settings.POSTGRES_POOL_SIZE)
+        return pool
+    except Exception as e:
+        logger.error("agent_connection_pool_failed", error=str(e))
+        if settings.ENVIRONMENT == Environment.PRODUCTION:
+            logger.warning("continuing_without_agent_connection_pool")
+            return None
+        raise
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
+    global _agent_conn_pool
+
     logger.info(
         "application_startup",
         project_name=settings.PROJECT_NAME,
@@ -54,15 +97,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception("cache_initialization_failed", error=str(e))
 
-    # Pre-warm the LangGraph agent: create graph + connection pool at startup
-    # to avoid cold-start latency on the first request
-    try:
-        await agent.create_graph()
-        logger.info("graph_pre_warmed")
-    except Exception as e:
-        logger.exception("graph_pre_warm_failed", error=str(e))
-
-    # Build the mapping agent's supervisor graph + wrap as CopilotKit SDK
+    # Build the datahash mapping agent + wrap as CopilotKit SDK
     # so /api/v1/copilotkit serves the AG-UI protocol.
     try:
         from copilotkit import (
@@ -73,43 +108,32 @@ async def lifespan(app: FastAPI):
 
         from app.agents import build_app_graph
 
-        conn_pool = await agent._get_connection_pool()
-        if conn_pool:
-            checkpointer = AsyncPostgresSaver(conn_pool)
+        _agent_conn_pool = await _create_agent_pool()
+        if _agent_conn_pool:
+            checkpointer = AsyncPostgresSaver(_agent_conn_pool)
             await checkpointer.setup()
         else:
             checkpointer = None
 
         mapping_graph = build_app_graph(checkpointer)
         ck_agent = LangGraphAGUIAgent(name="datahash_agent", graph=mapping_graph)
-        # LangGraphAGUIAgent uses AG-UI streaming (``.run()``), not the legacy
-        # CopilotKit ``execute()`` path — keep a direct reference for the router.
         app.state.langgraph_agent = ck_agent
-        # LangGraphAGUIAgent extends LangGraphAgent (ag_ui_langgraph), not
-        # the CopilotKit Agent base — runtime accepts it but type stub doesn't.
         app.state.copilotkit_sdk = CopilotKitRemoteEndpoint(agents=[ck_agent])  # pyright: ignore[reportArgumentType]
         logger.info(
-            "copilotkit_sdk_initialized",
+            "datahash_agent_initialized",
             agent_name="datahash_agent",
             has_checkpointer=checkpointer is not None,
         )
     except Exception as e:
-        logger.exception("copilotkit_sdk_init_failed", error=str(e))
-
-    # Pre-warm mem0 AsyncMemory: initializes pgvector connection and schema check
-    # so the first search() cache miss or add() doesn't pay the ~130ms cold-init cost
-    try:
-        await memory_service.initialize()
-    except Exception as e:
-        logger.exception("memory_service_pre_warm_failed", error=str(e))
+        logger.exception("datahash_agent_init_failed", error=str(e))
 
     yield
 
     # Cleanup on shutdown
     await cache_service.close()
-    if agent._connection_pool:
-        await agent._connection_pool.close()
-        logger.info("connection_pool_closed")
+    if _agent_conn_pool:
+        await _agent_conn_pool.close()
+        logger.info("agent_connection_pool_closed")
     logger.info("application_shutdown")
 
 
@@ -142,19 +166,9 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # pyright: ignore[reportArgumentType]
 
 
-# Add validation exception handler
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handle validation errors from request data.
-
-    Args:
-        request: The request that caused the validation error
-        exc: The validation error
-
-    Returns:
-        JSONResponse: A formatted error response
-    """
-    # Log the validation error
+    """Handle request validation errors."""
     logger.error(
         "validation_error",
         client_host=request.client.host if request.client else "unknown",
@@ -162,7 +176,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         errors=str(exc.errors()),
     )
 
-    # Format the errors to be more user-friendly
     formatted_errors = []
     for error in exc.errors():
         loc = " -> ".join([str(loc_part) for loc_part in error["loc"] if loc_part != "body"])
@@ -205,15 +218,9 @@ async def root(request: Request):
 @app.get("/health")
 @limiter.limit(settings.RATE_LIMIT_ENDPOINTS["health"][0])
 async def health_check(request: Request) -> JSONResponse:
-    """Health check endpoint with environment-specific information.
-
-    Returns:
-        JSONResponse: Health status payload, with HTTP 503 when the
-        database is unreachable so load balancers can drop the instance.
-    """
+    """Health check endpoint — returns 503 if the database is unreachable."""
     logger.info("health_check_called")
 
-    # Check database connectivity
     db_healthy = await database_service.health_check()
 
     response = {
@@ -224,7 +231,5 @@ async def health_check(request: Request) -> JSONResponse:
         "timestamp": datetime.now().isoformat(),
     }
 
-    # If DB is unhealthy, set the appropriate status code
     status_code = status.HTTP_200_OK if db_healthy else status.HTTP_503_SERVICE_UNAVAILABLE
-
     return JSONResponse(content=response, status_code=status_code)

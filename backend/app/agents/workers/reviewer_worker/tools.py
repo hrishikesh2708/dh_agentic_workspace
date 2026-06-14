@@ -8,6 +8,8 @@ Ported from three crawler_agent files:
    ``build_mapping_summary`` (module-level helpers)
 - ``src/graph/interrupts.py``            → ``build_mapping_review_interrupt``
    (the canonical/projection HITL payload builder)
+- ``src/persistence/sessions.py``        → :func:`persist_session`,
+   :func:`apply_review_response` (moved from learning_worker)
 
 Import-path-only rewrites; logic is verbatim. The review helpers were
 originally written against ``MappingRouterState`` (TypedDict, dict-shaped
@@ -19,8 +21,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
 from app.agents.core.agent_config import _AgentSettingsProxy
+from app.agents.core.intent_validation import source_connector_id
 from app.agents.orchestrator.state import GlobalAgentState
+from app.core.metrics import mapping_runs_total
+from app.models.field_mapping import FieldMapping
+from app.models.mapping_session import MappingSession
 from app.schemas.agent.types import (
     MappingStatus,
     ProposedMapping,
@@ -239,3 +247,92 @@ def build_mapping_review_interrupt(
         "destination_fields": destination_fields,
         "mapping_summary": mapping_summary,
     }
+
+
+# -----------------------------------------------------------------------------
+# Session persistence helpers (moved from learning_worker)
+# -----------------------------------------------------------------------------
+
+
+def apply_review_response(mappings: list[dict], response: Any) -> list[dict]:
+    """Merge the client's HITL ``response`` payload into the mapping list."""
+    updated = [dict(m) for m in mappings]
+    if not isinstance(response, dict):
+        return updated
+
+    approved_all = response.get("approved", True)
+    review_map = {
+        r["source_field"]: r for r in (response.get("reviews") or []) if isinstance(r, dict) and "source_field" in r
+    }
+
+    for i, m in enumerate(updated):
+        src = m.get("source_field", "")
+        if src in review_map:
+            rev = review_map[src]
+            updated[i] = {**m, "status": rev.get("status", "human_approved")}
+            if "destination_field" in rev:
+                dest = rev.get("destination_field")
+                updated[i]["destination_field"] = dest if dest else None
+        elif approved_all and m.get("status") in {"needs_review", "unmatched"}:
+            updated[i] = {**m, "status": "human_approved"}
+
+    return updated
+
+
+def _has_destination(mapping) -> bool:
+    """True if a :class:`ProposedMapping` has a non-empty destination_field."""
+    dest = mapping.destination_field
+    return bool(dest and str(dest).strip())
+
+
+async def persist_session(state, session_maker: async_sessionmaker, kind: str) -> dict[str, Any]:
+    """Persist a finished mapping run + its field mappings to Postgres."""
+    async with session_maker() as db:
+        customer_id = state.customer_id or 1
+
+        dest_type = state.destination_type or ""
+        if kind == "canonical":
+            dest_type = "canonical"
+
+        source_value = source_connector_id(state.source, fallback="salesforce")
+        ms = MappingSession(
+            customer_id=customer_id,
+            source=source_value,
+            source_object=state.source_object or "",
+            destination_type=dest_type,
+            status="completed",
+            mapping_kind=kind,
+            canonical_session_id=state.canonical_session_id if kind == "projection" else None,
+        )
+        db.add(ms)
+        await db.flush()
+
+        for m in state.mappings or []:
+            if not _has_destination(m):
+                continue
+            assert ms.id is not None  # noqa: S101
+            db.add(
+                FieldMapping(
+                    session_id=ms.id,
+                    source_field=m.source_field,
+                    destination_field=m.destination_field,
+                    confidence=float(m.confidence or 0.0),
+                    status=m.status.value if hasattr(m.status, "value") else str(m.status),
+                    reasoning=m.reasoning or "",
+                    transformation=m.transformation_needed,
+                    validation_status=(
+                        m.validation_status.value
+                        if hasattr(m.validation_status, "value")
+                        else str(m.validation_status)
+                    ),
+                    validation_notes=list(m.validation_notes or []),
+                )
+            )
+
+        await db.commit()
+
+    mapping_runs_total.labels(mapping_kind=kind).inc()
+    result: dict[str, Any] = {"session_id": ms.id}
+    if kind == "canonical":
+        result["canonical_session_id"] = ms.id
+    return result

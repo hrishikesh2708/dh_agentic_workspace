@@ -2,7 +2,7 @@
 
 Stage 1 wave 3 lands only the foundational services (OpenAI, Salesforce,
 vector store, connector schema registry) plus the SQLAlchemy session maker. The
-remaining pipeline-agent singletons (mapper, validator, scorer, learner,
+remaining pipeline-agent singletons (mapper, validator, scorer,
 schema_extractor, internal_schema, schema_registry) are appended as each
 worker module is ported in Wave 4.
 
@@ -27,7 +27,6 @@ from app.services.connector_schema import (
 )
 from app.agents.shared_tools.salesforce_client import SalesforceClient
 from app.agents.shared_tools.vector_store import VectorStoreService
-from app.agents.workers.learning_worker.tools import FeedbackLearningAgent
 from app.agents.workers.mapper_worker.tools import MapperAgent
 from app.agents.workers.reviewer_worker.tools import (
     ConfidenceScorerAgent,
@@ -46,7 +45,7 @@ openai = OpenAIService(agent_settings)
 vector_store = VectorStoreService(agent_settings)
 salesforce = SalesforceClient(agent_settings)
 
-# --- Shared async DB engine (used by learning_worker + connector catalog) ---
+# --- Shared async DB engine (used by reviewer_worker + connector catalog) ---
 db_engine = create_async_engine(agent_settings.database_url, echo=False, future=True)
 session_maker = async_sessionmaker(db_engine, expire_on_commit=False)
 
@@ -67,6 +66,3 @@ mapper = MapperAgent(agent_settings, openai, vector_store)
 # --- Reviewer-stage pipeline agents (Wave 4: reviewer_worker) ---
 validator = ValidatorAgent()
 scorer = ConfidenceScorerAgent(agent_settings)
-
-# --- Learning-stage pipeline agent (Wave 4: learning_worker) ---
-learner = FeedbackLearningAgent(agent_settings, openai, vector_store, session_maker)

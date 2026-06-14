@@ -37,14 +37,12 @@ from app.agents.core.messages import (
 from app.core.metrics import hitl_interruptions_total
 from app.agents.core.narratives import CANONICAL_LABEL
 from app.agents.orchestrator.state import GlobalAgentState
-from app.agents.workers.learning_worker.tools import (
-    apply_review_response,
-    persist_session,
-)
 from app.agents.workers.reviewer_worker.tools import (
+    apply_review_response,
     build_mapping_review_interrupt,
     build_mapping_summary,
     expand_mappings_for_review,
+    persist_session,
 )
 from app.schemas.agent.types import (
     MappingKind,
@@ -136,11 +134,7 @@ async def _auto_persist(state: GlobalAgentState) -> dict[str, Any]:
     """Auto-approve path: persist immediately, narrate stage completion.
 
     Mirrors crawler_agent's ``canonical_auto_persist``. For projection runs
-    there's no equivalent in the original code — projection auto-approve
-    falls through to ``learning_worker.persist`` directly — but we keep a
-    branch here so the sub-graph shape stays uniform; for projection we
-    simply skip persistence (it'll happen in learning_worker.persist) and
-    narrate the map-confirmed event.
+    we skip persistence and narrate the map-confirmed event only.
     """
     mapping_kind = state.mapping_kind.value
     if mapping_kind == "canonical":
@@ -158,7 +152,7 @@ async def _auto_persist(state: GlobalAgentState) -> dict[str, Any]:
         ]
         return result
 
-    # projection auto-approve: narrate only; learning_worker.persist will handle DB.
+    # projection auto-approve: narrate only.
     return {
         "messages": [
             await projection_narrative_event("map", "confirmed", state),
