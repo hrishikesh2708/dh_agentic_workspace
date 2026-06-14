@@ -1,17 +1,13 @@
 "use client";
 
 import { Card, CardContent } from "@/components/ui/card";
-import type { MappingField } from "@/hooks/use-headless-interrupt";
-import type { MappingCompleteMessage } from "@/lib/parse-agent-message";
+import type { MappingCompleteMessage, MappingField } from "@/lib/parse-agent-message";
 
 export function MappingResultCard({ data }: { data: MappingCompleteMessage }) {
   const mappings: MappingField[] = data.mappings ?? [];
   const { total, auto_approved, human_reviewed } = data.stats;
-
-  const routeLabel =
-    data.mapping_kind === "projection"
-      ? `${data.source_label} ${data.source_object} → ${data.destination_label}`
-      : `${data.source_label} ${data.source_object} → Canonical`;
+  const channelLabel = data.channels?.length ? data.channels.join(", ") : "Canonical";
+  const routeLabel = `${data.source_label} ${data.source_object} → ${channelLabel}`;
 
   return (
     <Card className="w-full max-w-lg border-[var(--border)] bg-[var(--card)] shadow-sm">

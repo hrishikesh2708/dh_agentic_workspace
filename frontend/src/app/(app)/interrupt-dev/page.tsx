@@ -12,69 +12,42 @@
  *
  * interrupt("on_interrupt", {
  *
- *   // Phase 1 — pick CRM
+ *   // 1 — pick ad platforms (multi-select)
+ *   type: "select_channels",
+ *   options: [{ id, label, enabled }],   // enabled: false = "coming soon"
+ *   min_select?: 1,
+ *   default_selected?: string[],          // pre-selected IDs
+ *   // → resume: { selected: string[] }
+ *
+ *   // 2 — pick CRM (single-select)
  *   type: "select_source",
- *   title: "Choose your data source",
- *   message: "Select the CRM where your customer data lives.",
- *   hint?: "Don't see yours? More coming soon.",
- *   options: [{ id: "salesforce", label: "Salesforce", enabled: true }, ...],
- *   default_selected?: "salesforce",
+ *   options: [{ id, label, enabled }],   // enabled: false = "coming soon"
+ *   default_selected?: string,            // pre-selected ID
+ *   // → resume: { selected: string }
  *
- *   // Phase 2 — pick Salesforce object
- *   type: "select_object",
- *   title: "Select Salesforce object",
- *   message: "Which object contains your customer records?",
- *   requested?: "lead",               // user's raw text hint
- *   options: ["Lead", "Contact", "Account", ...],
+ *   // 3 — check source connection (3 variants)
+ *   type: "check_connection",
+ *   source_label: string,                 // e.g. "Salesforce"
+ *   connection_status: "not_connected" | "expired" | "connected",
+ *   message: string,                      // status description (stays in payload)
+ *   account_detail?: string,              // e.g. "Acme Corp · john@acme.com" — connected only
+ *   // → resume: onApprove({ action: "connect" }) | onReject("change_source")
  *
- *   // Phase 3 — pick destination
- *   type: "select_destination",
- *   title: "Choose destination pipeline",
- *   message: "Where should the mapped data go?",
- *   options: [
- *     { id: "canonical",  label: "Canonical Store",          description: "..." },
- *     { id: "meta_capi",  label: "Meta Conversions API",     description: "..." },
- *     { id: "google_dm",  label: "Google DM",                description: "..." },
- *   ],
- *
- *   // Phase 4 — review field mappings
- *   type: "mapping_review",
- *   source_object: "Lead",
- *   destination_type: "meta_capi",
- *   destination_label: "Meta CAPI",
- *   mapping_kind: "canonical" | "projection",
- *   mappings: [
- *     { source_field, destination_field, confidence: 0–1,
- *       status: "auto_approved" | "needs_review" | "unmatched" | "not_proposed" },
- *     ...
- *   ],
- *   destination_fields: [{ name, label, type?, required?, description? }, ...],
- *   mapping_summary?: { total_source_fields, mapped, not_proposed, needs_review },
- *
- *   // Phase 5 — confirm before saving
- *   type: "confirm_run",
- *   title?: "Ready to save mappings",
- *   message?: "Review the summary, then approve to save and activate.",
- *   summary: {
- *     source: "Salesforce",
- *     source_object: "Lead",
- *     destination: "Meta CAPI",
- *     total_fields: 12,
- *     mapped_fields: 10,
- *     canonical_step: true,
- *     projection_step: true,
- *   },
- *
- *   // Fallback — generic approve/reject
- *   proposal: "Free-text description of what the agent wants to do.",
+ *   // (remaining interrupts documented below each mock)
  * })
  *
  * Resume response shape (returned via command.resume):
- *   select_source      → { selected: "salesforce" }
- *   select_object      → { selected: "Lead" }
- *   select_destination → { selected: "meta_capi" }
- *   mapping_review     → { approved: true, reviews: [...], reason?: "..." }
- *                     OR { approved: false, reason?: "..." }
+ *   select_channels    → { selected: string[] }
+ *   select_source      → { selected: string }
+ *   check_connection   → { action: "connect" } | reject("change_source")
+ *   select_object      → { selected: string }
+ *   check_channels     → { action: "confirm_all" | "connect" | "skip", platform_id?: string }
+ *   mapping_review     → { approved: true, rows: [...] } | { approved: false }
+ *   canonical_mapping  → { approved: true } | { approved: true, skip_hints: true }
+ *   resolve_fields     → { action: "submit", resolutions: [{ field, action: "set_constant"|"map_field", value?|source_field? }] }
+ *                       // agent re-fires if more unresolved fields remain
+ *                    OR { action: "confirm" } (resolved state → agent received confirm)
+ *   activate_confirm   → { action: "activate" } | reject("review_matrix")
  *   confirm_run        → { approved: true, reason?: "..." }
  *                     OR { approved: false, reason?: "..." }
  *   generic            → { approved: true, reason?: "..." }
@@ -89,26 +62,34 @@ import type { ApprovalInterruptPayload } from "@/hooks/use-headless-interrupt";
 
 // ── Mock payloads (one per interrupt type) ─────────────────────────────────
 
+// ── 2. select_source ──────────────────────────────────────────────────────
+// Agent sends a plain chat message first, then fires this interrupt.
+// No title/message/hint in payload — those belong in the chat thread.
+//
+// Inbound:  { type, options, default_selected? }
+// Outbound: { selected: string }   e.g. "salesforce"
 const MOCK_SELECT_SOURCE: ApprovalInterruptPayload = {
   type: "select_source",
-  title: "Choose your data source",
-  message: "Select the CRM system your customer data lives in.",
-  hint: "Don't see your CRM? More sources are coming soon.",
   default_selected: "salesforce",
   options: [
-    { id: "salesforce", label: "Salesforce", enabled: true },
-    { id: "hubspot", label: "HubSpot", enabled: true },
-    { id: "marketo", label: "Marketo", enabled: false },
-    { id: "dynamics", label: "MS Dynamics", enabled: false },
+    { id: "salesforce", label: "Salesforce",   enabled: true  },
+    { id: "hubspot",    label: "HubSpot",       enabled: true  },
+    { id: "marketo",    label: "Marketo",       enabled: false },
+    { id: "dynamics",   label: "MS Dynamics",   enabled: false },
   ],
 };
 
+// ── 4. select_object ──────────────────────────────────────────────────────
+// Agent sends a plain chat message first, then fires this interrupt.
+// requested = agent's detected object from user's message — highlighted as
+// "suggested" and moved first. Omit if agent cannot infer.
+//
+// Inbound:  { type, options: string[], requested?: string }
+// Outbound: { selected: string }   e.g. "Opportunity"
 const MOCK_SELECT_OBJECT: ApprovalInterruptPayload = {
   type: "select_object",
-  title: "Select Salesforce object",
-  message: "Which object contains your customer records?",
-  requested: "lead",
-  options: ["Lead", "Contact", "Account", "Opportunity", "Campaign", "CampaignMember"],
+  requested: "opportunity",
+  options: ["Opportunity", "Lead", "Contact", "Account", "Campaign", "CampaignMember"],
 };
 
 
@@ -118,23 +99,32 @@ const SF_OPPORTUNITY_FIELDS = [
   "AccountId", "OwnerId", "LeadSource", "— constant —",
 ];
 
-// Single destination mapping review
+// ── 6. mapping_review (2 variants) ───────────────────────────────────────
+// Agent sends a plain chat message first, then fires this interrupt.
+// source_fields powers the per-row source dropdown — send the full object field list.
+// cells keyed by destination id; status drives the colour dot.
+//
+// Inbound:  { type, source_object, source_fields, destinations, rows }
+// Outbound: { approved: true, rows: MappingReviewRow[] }   // rows with user overrides
+//           onReject("edit_mapping")
+
+// Variant A — single destination, one needs_input
 const MOCK_MAPPING_REVIEW_SINGLE: ApprovalInterruptPayload = {
   type: "mapping_review",
   source_object: "Salesforce Opportunity",
   source_fields: SF_OPPORTUNITY_FIELDS,
   destinations: [{ id: "meta_capi", label: "Meta CRM CAPI" }],
   rows: [
-    { source_field: "Contact.Email",      cells: { meta_capi: { field: "email (hashed)",  status: "confident"   } } },
-    { source_field: "Contact.Phone",      cells: { meta_capi: { field: "phone (hashed)",  status: "confident"   } } },
-    { source_field: "StageName=Closed Won", cells: { meta_capi: { field: "event_name",    status: "confident"   } } },
-    { source_field: "CloseDate",          cells: { meta_capi: { field: "event_time",      status: "confident"   } } },
-    { source_field: "Amount",             cells: { meta_capi: { field: "value",           status: "confident"   } } },
-    { source_field: "— constant —", is_constant: true, cells: { meta_capi: { field: "currency", status: "needs_input" } } },
+    { source_field: "Contact.Email",       cells: { meta_capi: { field: "email (hashed)", status: "confident"   } } },
+    { source_field: "Contact.Phone",       cells: { meta_capi: { field: "phone (hashed)", status: "confident"   } } },
+    { source_field: "StageName=Closed Won",cells: { meta_capi: { field: "event_name",     status: "confident"   } } },
+    { source_field: "CloseDate",           cells: { meta_capi: { field: "event_time",     status: "confident"   } } },
+    { source_field: "Amount",              cells: { meta_capi: { field: "value",           status: "confident"   } } },
+    { source_field: "— constant: USD —",   cells: { meta_capi: { field: "currency",        status: "needs_input" } } },
   ],
 };
 
-// Multi-destination mapping review
+// Variant B — multi destination, mixed statuses + not_required cells
 const MOCK_MAPPING_REVIEW_MULTI: ApprovalInterruptPayload = {
   type: "mapping_review",
   source_object: "Salesforce Opportunity",
@@ -144,32 +134,46 @@ const MOCK_MAPPING_REVIEW_MULTI: ApprovalInterruptPayload = {
     { id: "google_offline", label: "Google Offline"  },
   ],
   rows: [
-    { source_field: "Contact.Email",   cells: { meta_capi: { field: "email (hashed)", status: "confident" }, google_offline: { field: "email (hashed)",   status: "confident"   } } },
-    { source_field: "Contact.Phone",   cells: { meta_capi: { field: "phone (hashed)", status: "confident" }, google_offline: { field: "phone (hashed)",   status: "confident"   } } },
-    { source_field: "Amount",          cells: { meta_capi: { field: "value",          status: "confident" }, google_offline: { field: "conversion value", status: "confident"   } } },
-    { source_field: "CloseDate",       cells: { meta_capi: { field: "event_time",     status: "confident" }, google_offline: { field: "conversion_time",  status: "confident"   } } },
-    { source_field: "StageName=Closed Won", cells: { meta_capi: { field: "event_name", status: "confident" }, google_offline: { field: "conversion action — pick", status: "needs_input" } } },
-    { source_field: "— constant: USD —",    cells: { meta_capi: { field: "currency",   status: "confident" }, google_offline: { field: "currency",         status: "confident"   } } },
-    { source_field: "GCLID (if present)",   cells: { meta_capi: { field: null,         status: "not_required" }, google_offline: { field: "gclid",         status: "needs_input" } } },
+    { source_field: "Contact.Email",       cells: { meta_capi: { field: "email (hashed)",           status: "confident"   }, google_offline: { field: "email (hashed)",          status: "confident"   } } },
+    { source_field: "Contact.Phone",       cells: { meta_capi: { field: "phone (hashed)",           status: "confident"   }, google_offline: { field: "phone (hashed)",          status: "confident"   } } },
+    { source_field: "Amount",              cells: { meta_capi: { field: "value",                    status: "confident"   }, google_offline: { field: "conversion value",        status: "confident"   } } },
+    { source_field: "CloseDate",           cells: { meta_capi: { field: "event_time",               status: "confident"   }, google_offline: { field: "conversion_time",         status: "confident"   } } },
+    { source_field: "StageName=Closed Won",cells: { meta_capi: { field: "event_name",               status: "confident"   }, google_offline: { field: "conversion action — pick", status: "needs_input" } } },
+    { source_field: "— constant: USD —",   cells: { meta_capi: { field: "currency",                 status: "confident"   }, google_offline: { field: "currency",                status: "confident"   } } },
+    { source_field: "GCLID (if present)",  cells: { meta_capi: { field: null,                       status: "not_required" }, google_offline: { field: "gclid",                 status: "needs_input" } } },
   ],
 };
 
-// Canonical mapping
+// ── 7. canonical_mapping ─────────────────────────────────────────────────
+// Agent sends a plain chat message first, then fires this interrupt.
+// source_fields powers the per-row dropdown — send the full object field list.
+// info_text stays in payload — static inline explainer shown at the bottom.
+//
+// Inbound:  { type, canonical_rows, source_fields, info_text? }
+// Outbound: { approved: true, rows: CanonicalMappingRow[] }  // with user overrides
 const MOCK_CANONICAL_MAPPING: ApprovalInterruptPayload = {
   type: "canonical_mapping",
+  source_fields: SF_OPPORTUNITY_FIELDS,
   canonical_rows: [
-    { canonical_field: "Email",            description: "Required · all 5 destinations",                          status: "confident",   source_field: "Contact.Email"         },
-    { canonical_field: "Phone",            description: "Recommended · all 5 · lifts match rate",                 status: "confident",   source_field: "Contact.Phone"         },
-    { canonical_field: "Conversion value", description: "Required · all 5",                                       status: "confident",   source_field: "Amount"                },
-    { canonical_field: "Currency",         description: "Required · all 5",                                       status: "confident",   source_field: "Constant: USD"         },
-    { canonical_field: "Conversion time",  description: "Required · all 5",                                       status: "confident",   source_field: "CloseDate"             },
-    { canonical_field: "Conversion event", description: "Required · all 5 · Google needs an action match",        status: "needs_input", source_field: "StageName = Closed Won"},
-    { canonical_field: "Click ID (GCLID)", description: "Google & Microsoft only · matches the ad click",         status: "needs_input", source_field: "GCLID"                 },
+    { canonical_field: "Email",            description: "Required · all 5 destinations",                   status: "confident",   source_field: "Contact.Email"          },
+    { canonical_field: "Phone",            description: "Recommended · all 5 · lifts match rate",          status: "confident",   source_field: "Contact.Phone"          },
+    { canonical_field: "Conversion value", description: "Required · all 5",                                status: "confident",   source_field: "Amount"                 },
+    { canonical_field: "Currency",         description: "Required · all 5",                                status: "confident",   source_field: "Constant: USD"          },
+    { canonical_field: "Conversion time",  description: "Required · all 5",                                status: "confident",   source_field: "CloseDate"              },
+    { canonical_field: "Conversion event", description: "Required · all 5 · Google needs an action match", status: "needs_input", source_field: "StageName = Closed Won" },
+    { canonical_field: "Click ID (GCLID)", description: "Google & Microsoft only · matches the ad click",  status: "needs_input", source_field: "GCLID"                  },
   ],
   info_text: "Signals sends these to Meta, Google, TikTok, Snapchat & LinkedIn automatically — per-platform field names are handled for you.",
 };
 
 
+// ── 3. check_connection (3 variants) ─────────────────────────────────────
+// message stays in the interrupt payload — it's status data, not intro text.
+// account_detail is only sent when connection_status === "connected".
+//
+// Inbound:  { type, source_label, connection_status, message, account_detail? }
+// Outbound: onApprove({ action: "connect" })   — connect / reconnect / continue
+//           onReject("change_source")           — only shown when not connected
 const MOCK_CHECK_CONNECTION_NONE: ApprovalInterruptPayload = {
   type: "check_connection",
   source_label: "Salesforce",
@@ -190,27 +194,40 @@ const MOCK_CHECK_CONNECTION_OK: ApprovalInterruptPayload = {
   type: "check_connection",
   source_label: "Salesforce",
   connection_status: "connected",
+  account_detail: "Acme Corp · john@acme.com",
   message:
-    "Active connection found for project Acme Prod. You're good to go — the agent will use this connection to fetch your Salesforce schema.",
+    "Active connection found. The agent will use this to fetch your Salesforce schema.",
 };
 
+// ── 1. select_channels ────────────────────────────────────────────────────
+// Agent sends a plain chat message first, then fires this interrupt.
+// No title/message in payload — those belong in the chat thread.
+//
+// Inbound:  { type, options, min_select, default_selected? }
+// Outbound: { selected: string[] }   e.g. ["meta", "google"]
 const MOCK_SELECT_CHANNELS: ApprovalInterruptPayload = {
   type: "select_channels",
-  title: "Select channels",
-  message: "Choose the ad platforms you want to map your data to.",
   min_select: 1,
+  default_selected: ["meta"],          // pre-select Meta; agent can pass [] for none
   options: [
     { id: "meta",     label: "Meta",        enabled: true  },
     { id: "google",   label: "Google",      enabled: true  },
     { id: "tiktok",   label: "TikTok",      enabled: true  },
     { id: "snapchat", label: "Snapchat",    enabled: true  },
-    { id: "twitter",  label: "X (Twitter)", enabled: true  },
     { id: "linkedin", label: "LinkedIn",    enabled: true  },
-    { id: "bing",     label: "Bing",        enabled: true  },
+    { id: "twitter",  label: "X (Twitter)", enabled: false }, // coming soon
+    { id: "bing",     label: "Bing",        enabled: false }, // coming soon
   ],
 };
 
-// Note: message/info_text are sent as regular agent chat messages — NOT in the interrupt payload.
+// ── 5. check_channels (3 variants) ───────────────────────────────────────
+// Agent sends a plain chat message first, then fires this interrupt.
+// detail should always be present when connected (shows which account).
+//
+// Inbound:  { type, channels: ChannelConnectionStatus[] }
+// Outbound: { action: "connect" | "skip" | "confirm_all", platform_id?: string }
+
+// Variant A — some pending
 const MOCK_CHECK_CHANNELS_MIXED: ApprovalInterruptPayload = {
   type: "check_channels",
   channels: [
@@ -219,6 +236,7 @@ const MOCK_CHECK_CHANNELS_MIXED: ApprovalInterruptPayload = {
   ],
 };
 
+// Variant B — one expired
 const MOCK_CHECK_CHANNELS_EXPIRED: ApprovalInterruptPayload = {
   type: "check_channels",
   channels: [
@@ -228,6 +246,20 @@ const MOCK_CHECK_CHANNELS_EXPIRED: ApprovalInterruptPayload = {
   ],
 };
 
+// Variant C — all connected → green "All connected — continue" CTA
+const MOCK_CHECK_CHANNELS_ALL_CONNECTED: ApprovalInterruptPayload = {
+  type: "check_channels",
+  channels: [
+    { id: "meta",   label: "Meta",   status: "connected", detail: "Acme Business Manager · CRM CAPI ready" },
+    { id: "google", label: "Google", status: "connected", detail: "Acme Ads · Offline Conversions ready" },
+  ],
+};
+
+// ── 9. activate_confirm ───────────────────────────────────────────────────
+// Inbound:  { type, validation?, summary_card?, confirm_label?, secondary_label? }
+//   validation: green left-bar block with title + checks[]
+//   summary_card: plain border block with title + lines[]
+// Outbound: onApprove({ action: "activate" }) | onReject("review_matrix")
 const MOCK_ACTIVATE_CONFIRM: ApprovalInterruptPayload = {
   type: "activate_confirm",
   validation: {
@@ -250,6 +282,11 @@ const MOCK_ACTIVATE_CONFIRM: ApprovalInterruptPayload = {
   secondary_label: "Review matrix",
 };
 
+// ── 8 resolve_fields (has_issues) ──────────────────────────────────────────
+// Inbound:  { type, resolve_status, destination_label, source_fields, unresolved_fields }
+// Outbound: { action: "submit", resolutions: [{ field, action, value? | source_field? }] }
+//   action per field: "set_constant" (value=…) | "map_field" (source_field=…)
+// Agent re-fires this interrupt if more unresolved fields remain.
 const MOCK_RESOLVE_FIELDS_ISSUES: ApprovalInterruptPayload = {
   type: "resolve_fields",
   resolve_status: "has_issues",
@@ -257,7 +294,8 @@ const MOCK_RESOLVE_FIELDS_ISSUES: ApprovalInterruptPayload = {
   source_fields: SF_OPPORTUNITY_FIELDS,
   unresolved_fields: [
     { field: "currency", required: true, suggested_constant: "USD" },
-    { field: "conversion_event", required: true },
+    { field: "stage_name", required: true, suggested_source_field: "StageName" },
+    { field: "conversion_event", required: false },
   ],
 };
 
@@ -277,8 +315,9 @@ const STAGES: { label: string; tag: string; payload: ApprovalInterruptPayload }[
   { label: "3 — Check connection (expired)",      tag: "check_connection", payload: MOCK_CHECK_CONNECTION_EXPIRED },
   { label: "3 — Check connection (connected)",    tag: "check_connection", payload: MOCK_CHECK_CONNECTION_OK      },
   { label: "4 — Select object",                  tag: "select_object",    payload: MOCK_SELECT_OBJECT            },
-  { label: "5 — Check channels (mixed)",          tag: "check_channels",   payload: MOCK_CHECK_CHANNELS_MIXED    },
-  { label: "5 — Check channels (with expired)",   tag: "check_channels",   payload: MOCK_CHECK_CHANNELS_EXPIRED  },
+  { label: "5 — Check channels (mixed)",          tag: "check_channels",   payload: MOCK_CHECK_CHANNELS_MIXED         },
+  { label: "5 — Check channels (with expired)",   tag: "check_channels",   payload: MOCK_CHECK_CHANNELS_EXPIRED       },
+  { label: "5 — Check channels (all connected)",  tag: "check_channels",   payload: MOCK_CHECK_CHANNELS_ALL_CONNECTED },
   { label: "6 — Mapping review (single dest)",    tag: "mapping_review",   payload: MOCK_MAPPING_REVIEW_SINGLE   },
   { label: "6 — Mapping review (multi dest)",     tag: "mapping_review",   payload: MOCK_MAPPING_REVIEW_MULTI    },
   { label: "7 — Canonical mapping",               tag: "canonical_mapping",payload: MOCK_CANONICAL_MAPPING       },

@@ -24,7 +24,7 @@
  *   // Pipeline live
  *   { "type": "pipeline_activated", "pipeline_name": "Acme Prod — Opp → Meta + Google",
  *     "source_label": "Salesforce", "source_object": "Opportunity",
- *     "destinations": ["Meta CAPI", "Google Offline"], "total_fields": 47, "mapped_fields": 44 }
+ *     "channels": ["Meta CAPI", "Google Offline"], "total_fields": 47, "mapped_fields": 44 }
  *
  *   // Error
  *   { "type": "error", "title": "Connection failed", "message": "Could not reach Salesforce API." }
@@ -33,17 +33,18 @@
  *   { "type": "warning", "title": "3 fields unmapped", "message": "You'll review these in the next step." }
  *
  *   // Intent acknowledged (existing)
- *   { "type": "intent_ack", "message": "...", "source_label": "Salesforce", "source_object": "Opportunity",
- *     "destination_label": "Meta CAPI", "complete": true, "subtitle": "Setup confirmed" }
+ *   { "type": "intent_ack", "run_mode": "Offline conversion",
+ *     "sources": ["Salesforce"], "source_object": ["Opportunity"], "channels": ["Meta", "Google"] }
  *
  *   // Agent event (existing)
- *   { "type": "agent_event", "event": "step", "message": "...",
- *     "phase": "canonical", "step": "map", "step_index": 2, "step_total": 4, "status": "in_progress" }
+ *   { "type": "agent_event", "message": "...",
+ *     "status": "in_progress"|"done", "step_index": 2, "step_total": 9, "event"?: "schema_fetched" }
  *
  *   // Mapping complete (existing)
  *   { "type": "mapping_complete", "summary": "...", "source_label": "Salesforce",
- *     "source_object": "Opportunity", "destination_label": "Meta CAPI",
- *     "mapping_kind": "projection", "mappings": [...], "stats": { "total": 10, "auto_approved": 8, "human_reviewed": 2 } }
+ *     "source_object": "Opportunity", "channels": ["Meta CAPI"],
+ *     "mappings": [...], "stats": { "total": 10, "auto_approved": 8, "human_reviewed": 2 } }
+ *     // channels: [] = canonical layer mapping
  */
 
 "use client";
@@ -68,9 +69,8 @@ import type {
   StepCompleteMessage,
   ThinkingMessage,
   WarningMessage,
+  MappingField,
 } from "@/lib/parse-agent-message";
-
-import type { MappingField } from "@/hooks/use-headless-interrupt";
 
 // ── Mock data ──────────────────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ const MOCK_PIPELINE_ACTIVATED: PipelineActivatedMessage = {
   pipeline_name: "Acme Prod — Opportunity → Meta + Google",
   source_label: "Salesforce",
   source_object: "Opportunity",
-  destinations: ["Meta CAPI", "Google Offline"],
+  channels: ["Meta CAPI", "Google Offline"],
   total_fields: 47,
   mapped_fields: 44,
 };
@@ -135,34 +135,25 @@ const MOCK_WARNING: WarningMessage = {
 const MOCK_INTENT_ACK: IntentAckMessage = {
   type: "intent_ack",
   run_mode: "Offline conversion",
-  source_label: "Salesforce",
-  source_object: "Opportunity",
-  destinations: ["Meta", "Google"],
+  sources: ["Salesforce"],
+  source_object: ["Opportunity"],
+  channels: ["Meta", "Google"],
 };
 
 const MOCK_EVENT_IN_PROGRESS: AgentEventMessage = {
   type: "agent_event",
-  event: "step",
   message: "Generating canonical field mappings…",
-  phase: "canonical",
-  step: "map",
   step_index: 2,
-  step_total: 4,
+  step_total: 9,
   status: "in_progress",
 };
 
 const MOCK_EVENT_CONFIRMED: AgentEventMessage = {
   type: "agent_event",
-  event: "step",
   message: "Canonical mappings generated — 7 fields mapped automatically.",
-  phase: "canonical",
-  step: "map",
   step_index: 2,
-  step_total: 4,
-  status: "confirmed",
-  source_label: "Salesforce",
-  source_object: "Opportunity",
-  destination_label: "Meta CAPI",
+  step_total: 9,
+  status: "done",
 };
 
 const MOCK_MAPPING_FIELDS: MappingField[] = [
@@ -180,8 +171,7 @@ const MOCK_MAPPING_COMPLETE: MappingCompleteMessage = {
   summary: "Field mapping complete — 6 of 7 fields mapped for Meta CAPI",
   source_label: "Salesforce",
   source_object: "Opportunity",
-  destination_label: "Meta CAPI",
-  mapping_kind: "projection",
+  channels: ["Meta CAPI"],   // empty array = canonical layer
   mappings: MOCK_MAPPING_FIELDS,
   stats: { total: 7, auto_approved: 5, human_reviewed: 1 },
 };

@@ -9,10 +9,7 @@ import { SchemaSummaryCard } from "./schema-summary-card";
 import { StepCompleteCard } from "./step-complete-card";
 import { ThinkingCard } from "./thinking-card";
 import { WarningCard } from "./warning-card";
-import {
-  isRedundantConfirmedEvent,
-  parseAgentMessage,
-} from "@/lib/parse-agent-message";
+import { parseAgentMessage } from "@/lib/parse-agent-message";
 
 export function AgentMessageBubble({
   content,
@@ -30,15 +27,8 @@ export function AgentMessageBubble({
     case "intent_ack":
       return <IntentAckCard data={parsed.data} />;
 
-    case "agent_event": {
-      if (
-        parsed.data.status === "confirmed" &&
-        isRedundantConfirmedEvent(parsed.data, priorAssistantContents)
-      ) {
-        return null;
-      }
+    case "agent_event":
       return <AgentEventLine data={parsed.data} />;
-    }
 
     case "thinking":
       return <ThinkingCard data={parsed.data} />;

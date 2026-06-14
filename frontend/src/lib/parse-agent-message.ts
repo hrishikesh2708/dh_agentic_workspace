@@ -1,14 +1,19 @@
 import { parseJson } from "@copilotkit/shared";
-import type { MappingField } from "@/hooks/use-headless-interrupt";
+
+// Field used in the mapping_complete agent message (distinct from interrupt payloads)
+export type MappingField = {
+  source_field: string;
+  destination_field: string | null;
+  confidence?: number;
+  status?: string; // "auto_approved" | "human_reviewed" | "missing" etc.
+};
 
 export type MappingCompleteMessage = {
   type: "mapping_complete";
   summary: string;
   source_label: string;
   source_object: string;
-  destination_label: string;
-  destination_type?: string;
-  mapping_kind: string;
+  channels: string[];        // ad platforms e.g. ["Meta"] or ["Meta", "Google"]; empty = canonical layer
   mappings: MappingField[];
   stats: {
     total: number;
@@ -20,32 +25,23 @@ export type MappingCompleteMessage = {
 
 export type IntentAckMessage = {
   type: "intent_ack";
-  // What the agent detected — shown as "DETECTED" chips
-  run_mode?: string;        // e.g. "Offline conversion" → chip "Type: Offline conversion"
-  source_label?: string;    // e.g. "Salesforce"         → chip "Source: Salesforce"
-  source_object?: string;   // e.g. "Opportunity"        → chip "Opportunity"
-  destinations?: string[];  // e.g. ["Meta", "Google"]   → one chip each
-  destination_label?: string; // fallback if no destinations array
-  destination_type?: string;
-  source?: string;
-  phase?: string;
+  // CRM sources — display labels, e.g. ["Salesforce"]
+  sources?: string[];
+  // CRM record types, e.g. ["Opportunity", "Lead"]
+  source_object?: string[];
+  // Run config
+  run_mode?: string;        // e.g. "Offline conversion"
+  // Ad platforms
+  channels?: string[];      // e.g. ["Meta", "Google"]
 };
 
 export type AgentEventMessage = {
   type: "agent_event";
-  event: string;
-  message: string;
-  phase?: string;
-  step?: string;
-  step_index?: number;
-  step_total?: number;
-  status?: string;
-  source?: string;
-  source_label?: string;
-  source_object?: string;
-  destination_type?: string;
-  destination_label?: string;
-  run_mode?: string;
+  message: string;           // line text shown in chat
+  status?: string;           // "in_progress" | "done" — drives italic/normal style
+  step_index?: number;       // used to derive dynamic header subtitle
+  step_total?: number;       // used to derive dynamic header subtitle
+  event?: string;            // optional slug e.g. "schema_fetched" — for backend use
 };
 
 export type ThinkingMessage = {
@@ -75,7 +71,7 @@ export type PipelineActivatedMessage = {
   pipeline_name?: string;
   source_label: string;
   source_object: string;
-  destinations: string[];
+  channels: string[];        // ad platforms e.g. ["Meta", "Google"]
   total_fields: number;
   mapped_fields: number;
 };
@@ -92,23 +88,6 @@ export type WarningMessage = {
   message: string;
 };
 
-function isLeakedIntentParseJson(parsed: Record<string, unknown>): boolean {
-  return (
-    "source" in parsed &&
-    "source_object" in parsed &&
-    "destination" in parsed &&
-    parsed.type === undefined
-  );
-}
-
-function intentAckFromLeakedJson(parsed: Record<string, unknown>): IntentAckMessage {
-  return {
-    type: "intent_ack",
-    source: String(parsed.source ?? ""),
-    source_object: String(parsed.source_object ?? ""),
-    destination_type: String(parsed.destination ?? ""),
-  };
-}
 
 export type ParsedAgentMessage =
   | { kind: "text"; text: string }
@@ -184,76 +163,7 @@ export function parseAgentMessage(content: unknown): ParsedAgentMessage {
       return { kind: "warning", data: parsed as WarningMessage };
     }
 
-    if (isLeakedIntentParseJson(obj)) {
-      return { kind: "intent_ack", data: intentAckFromLeakedJson(obj) };
-    }
   }
 
   return { kind: "text", text };
-}
-
-const PHASE_LABELS: Record<string, string> = {
-  intent: "Intent",
-  canonical: "Canonical",
-  projection: "Projection",
-};
-
-const STEP_LABELS: Record<string, string> = {
-  requirements: "Requirements",
-  parse: "Parse",
-  source: "Source",
-  object: "Object",
-  destination: "Destination",
-  bridge: "Bridge",
-  map: "Mapping",
-  setup: "Setup",
-};
-
-export function formatAgentStepLabel(data: AgentEventMessage): string | null {
-  if (!data.phase || !data.step) return null;
-  const phaseName = PHASE_LABELS[data.phase] ?? data.phase;
-  const stepName = STEP_LABELS[data.step] ?? data.step;
-  if (
-    data.step_index !== undefined &&
-    data.step_total !== undefined &&
-    data.step_total > 0 &&
-    data.step_index > 0
-  ) {
-    return `${phaseName} · ${stepName} (${data.step_index}/${data.step_total})`;
-  }
-  return `${phaseName} · ${stepName}`;
-}
-
-/** @deprecated Use formatAgentStepLabel */
-export const formatIntentStepLabel = formatAgentStepLabel;
-
-/** Hide gather confirmed lines already covered by an earlier intent_ack narrator card. */
-export function isRedundantConfirmedEvent(
-  event: AgentEventMessage,
-  priorAssistantContents: unknown[],
-): boolean {
-  if (event.status !== "confirmed") return false;
-  if (event.step !== "source" && event.step !== "object") return false;
-
-  for (const content of priorAssistantContents) {
-    const parsed = parseAgentMessage(content);
-    if (parsed.kind !== "intent_ack") continue;
-    const ack = parsed.data;
-    if (
-      event.step === "source" &&
-      ack.source_label &&
-      event.source_label === ack.source_label
-    ) {
-      return true;
-    }
-    if (
-      event.step === "object" &&
-      ack.source_object &&
-      event.source_object &&
-      ack.source_object.toLowerCase() === event.source_object.toLowerCase()
-    ) {
-      return true;
-    }
-  }
-  return false;
 }

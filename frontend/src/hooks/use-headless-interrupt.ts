@@ -9,37 +9,11 @@ export { normalizeInterruptPayload } from "@/lib/normalize-interrupt-payload";
 
 export const INTERRUPT_EVENT_NAME = "on_interrupt";
 
-export type MappingField = {
-  source_field: string;
-  destination_field?: string | null;
-  confidence: number;
-  reasoning?: string;
-  transformation_needed?: string | null;
-  validation_status?: string;
-  validation_notes?: string[];
-  status?: string;
-};
-
 export type SelectOption = {
   id: string;
   label: string;
   enabled?: boolean;
   description?: string;
-};
-
-export type DestinationFieldOption = {
-  name: string;
-  label?: string;
-  type?: string;
-  required?: boolean;
-  description?: string;
-};
-
-export type MappingSummary = {
-  total_source_fields: number;
-  mapped: number;
-  not_proposed: number;
-  needs_review: number;
 };
 
 export type MappingDestination = {
@@ -55,14 +29,14 @@ export type MappingCell = {
 
 export type MappingReviewRow = {
   source_field: string;
-  is_constant?: boolean;
   cells: Record<string, MappingCell>;
 };
 
 export type UnresolvedField = {
   field: string;
   required: boolean;
-  suggested_constant?: string; // e.g. "USD" — shown as "Set constant: USD"
+  suggested_constant?: string;      // e.g. "USD" → chip "Set constant: USD"
+  suggested_source_field?: string;  // e.g. "StageName = Closed Won" → chip "Map to: …"
 };
 
 export type ChannelConnectionStatus = {
@@ -97,20 +71,11 @@ export type CanonicalMappingRow = {
 export type ApprovalInterruptPayload = {
   type?: string;
   phase?: string;
-  title?: string;
-  message?: string;
-  hint?: string;
-  default_selected?: string;
+  default_selected?: string | string[];
   // generic approval
   proposal?: string;
   // mapping_review
-  mapping_kind?: string;
   source_object?: string;
-  destination_type?: string;
-  destination_label?: string;
-  mappings?: MappingField[];
-  destination_fields?: DestinationFieldOption[];
-  mapping_summary?: MappingSummary;
   // select_source | select_channels
   options?: SelectOption[] | string[];
   // select_object
@@ -122,13 +87,15 @@ export type ApprovalInterruptPayload = {
   source_label?: string;
   // "not_connected" | "expired" | "connected"
   connection_status?: string;
+  account_detail?: string;  // e.g. "Acme Corp · john@acme.com" — shown when connected
+  message?: string;         // status description (check_connection only — shown in the card)
   // mapping_review (row-based, single or multi-destination)
   destinations?: MappingDestination[];
   rows?: MappingReviewRow[];
   source_fields?: string[]; // full list of available Salesforce fields for the dropdowns
   // canonical_mapping
   canonical_rows?: CanonicalMappingRow[];
-  info_text?: string;
+  info_text?: string;  // shown as blue info bar inside the card
   // resolve_fields
   // "has_issues" → amber, shows unresolved fields
   // "resolved"   → green, shows summary + confirm

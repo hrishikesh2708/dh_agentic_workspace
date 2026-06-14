@@ -3,23 +3,13 @@
 import type { IntentAckMessage } from "@/lib/parse-agent-message";
 
 export function IntentAckCard({ data }: { data: IntentAckMessage }) {
-  // Build chip list in order: type → source → object → destinations
+  // Build chip list in order: run_mode → sources → source_object → channels
   const chips: string[] = [];
 
-  if (data.run_mode) {
-    chips.push(`Type: ${data.run_mode}`);
-  }
-  if (data.source_label) {
-    chips.push(`Source: ${data.source_label}`);
-  }
-  if (data.source_object) {
-    chips.push(data.source_object);
-  }
-  if (data.destinations && data.destinations.length > 0) {
-    chips.push(...data.destinations);
-  } else if (data.destination_label) {
-    chips.push(data.destination_label);
-  }
+  if (data.run_mode) chips.push(`Type: ${data.run_mode}`);
+  if (data.sources?.length) chips.push(...data.sources.map((s) => `Source: ${s}`));
+  if (data.source_object?.length) chips.push(...data.source_object);
+  if (data.channels?.length) chips.push(...data.channels);
 
   if (chips.length === 0) return null;
 

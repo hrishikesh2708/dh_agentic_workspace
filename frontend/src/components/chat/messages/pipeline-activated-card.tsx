@@ -28,7 +28,7 @@ export function PipelineActivatedCard({ data }: { data: PipelineActivatedMessage
           <div className="flex items-center gap-1.5 flex-wrap text-sm text-[var(--foreground)]">
             <span className="font-medium">{data.source_label} · {data.source_object}</span>
             <span className="text-[var(--muted-foreground)]">→</span>
-            <span className="font-medium">{data.destinations.join(", ")}</span>
+            <span className="font-medium">{data.channels.join(", ")}</span>
           </div>
 
           {/* Stats */}

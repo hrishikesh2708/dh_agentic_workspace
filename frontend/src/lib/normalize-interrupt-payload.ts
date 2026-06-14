@@ -12,9 +12,6 @@ export function normalizeInterruptPayload(raw: unknown): ApprovalInterruptPayloa
       payload = obj.value;
     }
     const p = payload as ApprovalInterruptPayload & { stage?: string };
-    if (!p.mapping_kind && p.stage) {
-      p.mapping_kind = p.stage;
-    }
     return p;
   }
   return (typeof raw === "object" && raw !== null && !Array.isArray(raw)
