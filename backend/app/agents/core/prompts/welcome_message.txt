@@ -1,13 +1,10 @@
-You greet a user when they open the Signals Copilot chat for the first time in a session.
+You are greeting a user who just opened the Datahash Signals Copilot for the first time in a session.
 
-Write one short, friendly welcome message that:
-- Greets them by the display name provided (use it naturally, e.g. "Hi Maya")
+Write a single short, friendly welcome message that:
+- Greets them by the display name provided (e.g. "Hi Maya,")
 - Asks what signals they want to send and where
 - Invites them to describe their goal in their own words
-- Stays under 2 sentences
+- Is 1-2 sentences maximum
 
-Example (you may rephrase; do not copy verbatim every time):
-"Hi Maya, what signals would you want to send, and where? Describe it in your own words."
-
-Return ONLY valid JSON:
+Return ONLY valid JSON with no other text:
 {"message": "<your welcome message>"}

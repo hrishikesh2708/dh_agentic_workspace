@@ -9,6 +9,8 @@ import { CopilotChatLayout } from "./copilot-chat-layout";
 import { useHeadlessInterrupt } from "@/hooks/use-headless-interrupt";
 import { CHAT_AGENT_ID } from "@/lib/chat-constants";
 import { extractMessageText, parseAgentMessage } from "@/lib/parse-agent-message";
+import { CopilotKitCoreRuntimeConnectionStatus } from "@copilotkit/core";
+import { HttpAgent } from "@ag-ui/client";
 import { useAgent, useCopilotKit } from "@copilotkit/react-core/v2";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -36,7 +38,7 @@ export function HeadlessChat({
   const projectName = projectNameProp?.trim() || project.name?.trim() || "";
   const { copilotkit } = useCopilotKit();
   const { agent } = useAgent({ agentId: CHAT_AGENT_ID, threadId: sessionId });
-  const connectedSessionRef = useRef<string | null>(null);
+  const lastConnectedAgentRef = useRef<typeof agent | null>(null);
   const { pending, resolve } = useHeadlessInterrupt(sessionId);
   const [draft, setDraft] = useState("");
 
@@ -82,21 +84,47 @@ export function HeadlessChat({
   }, [pending, agent.messages]);
 
   useEffect(() => {
-    if (!sessionId || connectedSessionRef.current === sessionId) return;
+    if (
+      !sessionId ||
+      !agent ||
+      agent === lastConnectedAgentRef.current ||
+      copilotkit.runtimeConnectionStatus !==
+        CopilotKitCoreRuntimeConnectionStatus.Connected
+    ) {
+      return;
+    }
 
-    let cancelled = false;
-    connectedSessionRef.current = sessionId;
+    let detached = false;
+    lastConnectedAgentRef.current = agent;
 
-    void copilotkit.connectAgent({ agent }).catch((error: unknown) => {
-      if (cancelled) return;
-      connectedSessionRef.current = null;
-      console.error("HeadlessChat: connectAgent failed", error);
-    });
+    const connectAbortController = new AbortController();
+    if (agent instanceof HttpAgent) {
+      agent.abortController = connectAbortController;
+    }
+
+    void (async () => {
+      try {
+        await copilotkit.connectAgent({ agent });
+        if (detached) return;
+
+        const hasAssistant = agent.messages.some((m) => m.role === "assistant");
+        if (!hasAssistant && !agent.isRunning) {
+          await copilotkit.runAgent({ agent });
+        }
+      } catch (error) {
+        if (detached) return;
+        lastConnectedAgentRef.current = null;
+        console.error("HeadlessChat: connectAgent failed", error);
+      }
+    })();
 
     return () => {
-      cancelled = true;
+      detached = true;
+      lastConnectedAgentRef.current = null;
+      connectAbortController.abort();
+      void agent.detachActiveRun?.();
     };
-  }, [agent, copilotkit, sessionId]);
+  }, [agent, copilotkit, sessionId, copilotkit.runtimeConnectionStatus]);
 
   const sendMessage = useCallback(
     (text: string) => {

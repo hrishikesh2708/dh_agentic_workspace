@@ -54,7 +54,7 @@ class GlobalAgentState(BaseModel):
     mapping_kind: MappingKind = MappingKind.canonical
 
     # --- Session + bookkeeping ---
-    customer_id: int | None = None
+    user_id: int
     username: str = ""
     session_id: int | None = None
     canonical_session_id: int | None = None

@@ -67,7 +67,10 @@ export function ChatShell() {
 
     async function bootstrap() {
       try {
-        const existing = loadStoredSession();
+        // DEV ONLY: skip cached session so every refresh creates a fresh thread.
+        // Remove the `process.env.NODE_ENV !== "development"` guard before shipping.
+        const existing =
+          process.env.NODE_ENV !== "development" ? loadStoredSession() : null;
         if (existing) {
           if (!cancelled) { setSession(existing); setLoading(false); }
           return;

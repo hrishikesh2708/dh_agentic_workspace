@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.graph import END
 
 from app.agents.core import deps
@@ -14,84 +14,79 @@ from app.agents.orchestrator.state import GlobalAgentState
 from app.core.logging import logger
 from app.services.database import database_service
 
+# All agent prompts live here
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "core" / "prompts" / "welcome_message.txt"
-_DEFAULT_TEMPLATE = "Hi {display_name}, what signals would you want to send, and where? Describe it in your own words."
 
 
-def _load_welcome_system_prompt() -> str:
-    if not _PROMPT_PATH.exists():
-        return ""
-    return _PROMPT_PATH.read_text(encoding="utf-8").strip()
-
-
-def _display_name_from_email(email: str) -> str:
-    local = email.split("@", 1)[0].strip()
-    return local or "there"
+def _welcome_already_sent(messages: list[BaseMessage]) -> bool:
+    """True if an AI message already exists — welcome was already shown."""
+    return any(isinstance(m, AIMessage) for m in messages)
 
 
 async def _resolve_display_name(state: GlobalAgentState) -> str:
-    """Resolve a friendly name from state, then the user table."""
+    """Username from state (injected from session) → DB fallback → 'there'."""
     if state.username and state.username.strip():
         return state.username.strip()
 
-    customer_id = state.customer_id
-    if customer_id is None:
-        return "there"
-
     try:
-        user = await database_service.get_user(customer_id)
+        user = await database_service.get_user(state.user_id)
+        if user and user.username and user.username.strip():
+            return user.username.strip()
     except Exception:
-        logger.exception("welcome_user_lookup_failed", customer_id=customer_id)
-        return "there"
+        logger.exception("welcome_username_lookup_failed", user_id=state.user_id)
 
-    if user is None:
-        return "there"
-    if user.username and user.username.strip():
-        return user.username.strip()
-    if user.email:
-        return _display_name_from_email(user.email)
     return "there"
 
 
-def _fallback_welcome_message(display_name: str) -> str:
-    return _DEFAULT_TEMPLATE.format(display_name=display_name)
+async def _generate_welcome_message(display_name: str) -> str | None:
+    """Ask OpenAI to generate a greeting."""
+    if not _PROMPT_PATH.exists():
+        logger.warning("welcome_prompt_missing", path=str(_PROMPT_PATH))
+        return None
 
+    if not deps.openai.client:
+        logger.warning("welcome_openai_client_unavailable")
+        return None
 
-async def _generate_welcome_message(display_name: str) -> str:
-    """Generate a personalised welcome via OpenAI, with a static fallback."""
-    system_prompt = _load_welcome_system_prompt()
-    if deps.openai.client and system_prompt:
-        parsed = await deps.openai.chat_json(
-            system_prompt,
-            f"Display name: {display_name}",
-        )
+    prompt = _PROMPT_PATH.read_text(encoding="utf-8").strip()
+    if not prompt:
+        logger.warning("welcome_prompt_empty", path=str(_PROMPT_PATH))
+        return None
+
+    try:
+        parsed = await deps.openai.chat_json(prompt, f"Display name: {display_name}")
         message = str(parsed.get("message") or "").strip()
         if message:
             return message
+    except Exception:
+        logger.exception("welcome_message_generation_failed", display_name=display_name)
 
-    return _fallback_welcome_message(display_name)
+    return None
 
 
 async def welcome_user(state: GlobalAgentState) -> dict[str, Any]:
-    """Emit a welcome message on connect (no user message in the turn yet)."""
-    if last_user_text(state.messages or []):
+    """Emit a welcome message on first connect.
+
+    Skips only if an AI message already exists (welcome was already shown in
+    a previous turn). Always fires on the very first connection — even if the
+    user sends a message at the same time.
+    """
+    if _welcome_already_sent(state.messages or []):
         return {}
 
     display_name = await _resolve_display_name(state)
     message = await _generate_welcome_message(display_name)
+    if not message:
+        return {}
 
-    update: dict[str, Any] = {
-        "messages": [AIMessage(content=message)],
-    }
-    if state.customer_id is not None:
-        update["customer_id"] = state.customer_id
+    update: dict[str, Any] = {"messages": [AIMessage(content=message)]}
     if not state.username and display_name != "there":
         update["username"] = display_name
     return update
 
 
 def route_after_welcome(state: GlobalAgentState) -> str:
-    """Continue to intent when the user has sent a message; otherwise pause."""
+    """After welcome: go to intent if the user sent a message, otherwise wait."""
     if last_user_text(state.messages or []):
         return "intent"
     return END
