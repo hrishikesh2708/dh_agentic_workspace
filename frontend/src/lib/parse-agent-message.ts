@@ -88,6 +88,56 @@ export type WarningMessage = {
   message: string;
 };
 
+// --- Intent-phase message types ---
+
+/** Emitted by parse_initial_intent (intent_clarify) and handle_clarification (clarification_needed) */
+export type ClarificationMessage = {
+  type: "clarification_needed" | "intent_clarify";
+  message: string;
+  pending_slot?: string;
+  attempt?: number;
+  event?: string;
+  phase?: string;
+};
+
+/** Emitted by handle_clarification when a slot is successfully resolved */
+export type ClarificationResolvedMessage = {
+  type: "clarification_resolved";
+  message: string;
+  resolved_slot: string;
+  resolved_value: unknown;
+  event?: string;
+  phase?: string;
+};
+
+/** Emitted by confirm_intent — shows a structured summary for user sign-off */
+export type IntentSummaryMessage = {
+  type: "intent_summary";
+  message: string;
+  title?: string;
+  event?: string;
+  phase?: string;
+  details?: {
+    signal_type?: string;
+    signal_display?: string;
+    source?: string;
+    source_label?: string;
+    source_object?: string;
+    destinations?: string[];
+    destination_labels?: string[];
+  };
+  actions?: Array<{ id: string; label: string; style: string }>;
+};
+
+/** Emitted by handle_confirmation (complete / correction / reset) */
+export type IntentStatusMessage = {
+  type: "intent_complete" | "intent_correction" | "intent_reset";
+  message: string;
+  corrected_fields?: string[];
+  event?: string;
+  phase?: string;
+};
+
 
 export type ParsedAgentMessage =
   | { kind: "text"; text: string }
@@ -99,7 +149,11 @@ export type ParsedAgentMessage =
   | { kind: "schema_summary"; data: SchemaSummaryMessage }
   | { kind: "pipeline_activated"; data: PipelineActivatedMessage }
   | { kind: "error"; data: ErrorMessage }
-  | { kind: "warning"; data: WarningMessage };
+  | { kind: "warning"; data: WarningMessage }
+  | { kind: "clarification"; data: ClarificationMessage }
+  | { kind: "clarification_resolved"; data: ClarificationResolvedMessage }
+  | { kind: "intent_summary"; data: IntentSummaryMessage }
+  | { kind: "intent_status"; data: IntentStatusMessage };
 
 export function extractMessageText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -161,6 +215,28 @@ export function parseAgentMessage(content: unknown): ParsedAgentMessage {
 
     if (obj.type === "warning") {
       return { kind: "warning", data: parsed as WarningMessage };
+    }
+
+    // --- Intent-phase message types ---
+
+    if (obj.type === "clarification_needed" || obj.type === "intent_clarify") {
+      return { kind: "clarification", data: parsed as ClarificationMessage };
+    }
+
+    if (obj.type === "clarification_resolved") {
+      return { kind: "clarification_resolved", data: parsed as ClarificationResolvedMessage };
+    }
+
+    if (obj.type === "intent_summary") {
+      return { kind: "intent_summary", data: parsed as IntentSummaryMessage };
+    }
+
+    if (
+      obj.type === "intent_complete" ||
+      obj.type === "intent_correction" ||
+      obj.type === "intent_reset"
+    ) {
+      return { kind: "intent_status", data: parsed as IntentStatusMessage };
     }
 
   }

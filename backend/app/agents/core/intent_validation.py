@@ -35,20 +35,33 @@ def match_source_label(raw: str | None, sources: list[Sources]) -> Sources | Non
     return None
 
 
+def destination_platform_id(sub_connector_of: str | None, connector_id: str) -> str:
+    """Return the platform-level destination slug (parent when sub-connector, else connector)."""
+    return (sub_connector_of or connector_id).strip()
+
+
 def match_destination_slug(raw: str | None, destinations: list[Destinations]) -> str:
-    """Match a parsed display name or slug to a destination connector slug."""
+    """Match a parsed display name or slug to a destination platform slug."""
     needle = normalize_optional_str(raw)
     if not needle:
         return ""
     key = needle.lower()
     for destination in destinations:
-        candidates = {destination.connector_id.lower(), destination.display_name.lower()}
+        platform_id = destination_platform_id(
+            destination.sub_connector_of,
+            destination.connector_id,
+        ).lower()
+        candidates = {
+            destination.connector_id.lower(),
+            destination.display_name.lower(),
+            platform_id,
+        }
         if destination.parent_connector_name:
             candidates.add(destination.parent_connector_name.lower())
         if destination.parent_connector_id:
             candidates.add(destination.parent_connector_id.lower())
         if key in candidates:
-            return destination.connector_id.lower()
+            return platform_id
     return ""
 
 

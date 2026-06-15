@@ -26,7 +26,10 @@ function SelectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
   const options = (payload.options ?? []) as SelectOption[];
   const enabledOptions = options.filter((o) => o.enabled !== false);
 
-  // Normalize default_selected — may be string | string[] after shared type fix
+  // Backend sends recommended (= the LLM-inferred or already-valid source id)
+  const recommended = (payload.recommended as string | undefined) || "";
+
+  // Normalize default_selected — may be string | string[]
   const rawDefault = Array.isArray(payload.default_selected)
     ? payload.default_selected[0]
     : payload.default_selected;
@@ -40,15 +43,16 @@ function SelectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
   return (
     <Card className="border-[var(--border)] bg-[var(--card)]">
       <CardContent className="p-4 space-y-4">
-        {/* Section label — no title/message (those come as agent chat messages) */}
+        {/* Section label — message/hint rendered as chat bubbles in headless-chat */}
         <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
-          Data source
+          {(payload.title as string | undefined) || "Data source"}
         </p>
 
         <div className="flex flex-wrap gap-2">
           {options.map((opt) => {
             const isEnabled = opt.enabled !== false;
             const isSelected = selected === opt.id;
+            const isSuggested = !!recommended && opt.id === recommended;
 
             return (
               <button
@@ -78,6 +82,14 @@ function SelectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
                   )}
                 </span>
                 {opt.label}
+                {isSuggested && (
+                  <span className={[
+                    "text-[10px] font-medium transition-colors duration-300",
+                    isSelected ? "text-[var(--primary)]/70" : "text-[var(--muted-foreground)]",
+                  ].join(" ")}>
+                    suggested
+                  </span>
+                )}
                 {!isEnabled && (
                   <span className="text-[10px] text-[var(--muted-foreground)] opacity-70">soon</span>
                 )}
@@ -105,12 +117,23 @@ function SelectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
 
 function SelectObjectCard({ payload, onApprove }: HitlApprovalCardProps) {
   const rawOptions = payload.options ?? [];
-  const requested = payload.requested ?? "";
 
-  // Normalise to strings, move the suggested match to first position
+  // Backend sends recommended (and default_selected = recommended).
+  // payload.requested is not used for the normal gather_object flow.
+  const recommended =
+    (payload.recommended as string | undefined) ||
+    (Array.isArray(payload.default_selected)
+      ? payload.default_selected[0]
+      : payload.default_selected) ||
+    "";
+
+  // Normalise options to strings — backend may send string[] or SelectOption[]
   const allObjects = rawOptions.map((o) => (typeof o === "string" ? o : (o as SelectOption).id));
-  const suggested = requested
-    ? (allObjects.find((o) => o.toLowerCase() === requested.toLowerCase()) ?? "")
+
+  // Backend already orders: recommended first, alternatives next, then rest.
+  // If recommended isn't first, move it there so the UI matches the PRD.
+  const suggested = recommended
+    ? (allObjects.find((o) => o.toLowerCase() === recommended.toLowerCase()) ?? "")
     : allObjects[0] ?? "";
   const rest = allObjects.filter((o) => o !== suggested);
   const objects = suggested ? [suggested, ...rest] : allObjects;
@@ -120,15 +143,16 @@ function SelectObjectCard({ payload, onApprove }: HitlApprovalCardProps) {
   return (
     <Card className="border-[var(--border)] bg-[var(--card)]">
       <CardContent className="p-4 space-y-4">
-        {/* Section label — no title/message (those come as agent chat messages) */}
+        {/* Section label — message/hint rendered as chat bubbles in headless-chat */}
         <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
-          Salesforce object
+          {(payload.title as string | undefined) || "Salesforce object"}
         </p>
 
         <div className="flex flex-wrap gap-2">
           {objects.map((obj) => {
             const isSelected = selected === obj;
-            const isSuggested = obj === suggested && !!requested;
+            // Show "suggested" badge on the backend-recommended option
+            const isSuggested = obj === suggested && !!recommended;
 
             return (
               <button
@@ -602,9 +626,9 @@ function SelectChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
   return (
     <Card className="border-[var(--border)] bg-[var(--card)]">
       <CardContent className="p-4 space-y-4">
-        {/* Section label — no title/message (those come as agent chat messages) */}
+        {/* Section label — message/hint rendered as chat bubbles in headless-chat */}
         <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
-          Ad platforms
+          {(payload.title as string | undefined) || "Ad platforms"}
         </p>
 
         <div className="flex flex-wrap gap-2">

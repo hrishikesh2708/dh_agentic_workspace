@@ -86,7 +86,35 @@ async def welcome_user(state: GlobalAgentState) -> dict[str, Any]:
 
 
 def route_after_welcome(state: GlobalAgentState) -> str:
-    """After welcome: go to intent if the user sent a message, otherwise wait."""
-    if last_user_text(state.messages or []):
-        return "intent"
-    return END
+    """After welcome: route based on conversation state.
+
+    - No user message yet → END (wait for first message).
+    - intent_phase == "clarifying" → route directly to handle_clarification so
+      it sees the user's reply to the clarification question (not the original
+      message that triggered the question).
+    - intent_phase == "confirming" → route directly to handle_confirmation so
+      it sees the user's yes/no reply to the intent summary.
+    - Anything else → parse_initial_intent (registered as "intent").
+    """
+    if not last_user_text(state.messages or []):
+        return END
+
+    if state.intent_phase == "clarifying":
+        return "handle_clarification"
+
+    if state.intent_phase == "confirming":
+        return "handle_confirmation"
+
+    # Intent done but connection not complete — wait for connection phase to finish
+    if state.intent_phase_complete and not state.connection_phase_complete:
+        return END
+
+    # Connection done but mapping not complete — mapping phase runs without user input
+    if state.connection_phase_complete and not state.mapping_phase_complete:
+        return END
+
+    # Pipeline activated / mapping complete — nothing left to do
+    if state.mapping_phase_complete or state.pipeline_activated:
+        return END
+
+    return "intent"

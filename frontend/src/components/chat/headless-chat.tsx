@@ -12,7 +12,7 @@ import { extractMessageText, parseAgentMessage } from "@/lib/parse-agent-message
 import { CopilotKitCoreRuntimeConnectionStatus } from "@copilotkit/core";
 import { HttpAgent } from "@ag-ui/client";
 import { useAgent, useCopilotKit } from "@copilotkit/react-core/v2";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ── Step labels keyed by interrupt type (matches agreed sequence) ────────────
 const INTERRUPT_STEPS: Record<string, { step: number; total: number; label: string }> = {
@@ -41,6 +41,85 @@ export function HeadlessChat({
   const lastConnectedAgentRef = useRef<typeof agent | null>(null);
   const { pending, resolve } = useHeadlessInterrupt(sessionId);
   const [draft, setDraft] = useState("");
+
+  // ── Picker interrupt context (message + hint) ──────────────────────────────
+  // Captured into state the moment a picker interrupt arrives so the bubbles
+  // survive after `pending` clears when the user confirms their selection.
+  // Each entry records `afterIndex` = the last message index at capture time,
+  // so the bubbles are inserted at the right position in the thread.
+  const PICKER_TYPES = new Set(["select_source", "select_object", "select_channels"]);
+  type InterruptContext = { afterIndex: number; message?: string; hint?: string };
+  const [interruptContexts, setInterruptContexts] = useState<InterruptContext[]>([]);
+  const pendingProcessedRef = useRef(false);
+
+  useEffect(() => {
+    if (!pending?.value?.type) {
+      pendingProcessedRef.current = false; // reset so next interrupt is processed
+      return;
+    }
+    if (!PICKER_TYPES.has(pending.value.type)) return;
+    if (pendingProcessedRef.current) return; // already captured this interrupt
+    pendingProcessedRef.current = true;
+
+    const p = pending.value as { message?: string; hint?: string };
+    if (!p.message && !p.hint) return;
+
+    setInterruptContexts((prev) => [
+      ...prev,
+      {
+        afterIndex: agent.messages.length - 1, // insert after the current last message
+        message: p.message,
+        hint: p.hint,
+      },
+    ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending]);
+
+  // ── Group consecutive same-prefix confirmed events ───────────────────────────
+  // e.g. "Destination: Meta" + "Destination: Google" → "Destinations: Meta, Google"
+  // `originalIndex` maps back to agent.messages so interruptContexts stay aligned.
+  type DisplayMessage = { message: (typeof agent.messages)[0]; originalIndex: number; mergedContent?: string };
+  const displayMessages = useMemo<DisplayMessage[]>(() => {
+    const result: DisplayMessage[] = [];
+    let i = 0;
+    while (i < agent.messages.length) {
+      const msg = agent.messages[i];
+      if (msg.role === "assistant") {
+        const parsed = parseAgentMessage(msg.content);
+        if (parsed.kind === "agent_event" && parsed.data.status === "confirmed") {
+          const text = parsed.data.message;
+          const colonIdx = text.indexOf(": ");
+          if (colonIdx !== -1) {
+            const prefix = text.slice(0, colonIdx);
+            const firstValue = text.slice(colonIdx + 2);
+            const values = [firstValue];
+            let j = i + 1;
+            while (j < agent.messages.length) {
+              const next = agent.messages[j];
+              if (next.role !== "assistant") break;
+              const nextParsed = parseAgentMessage(next.content);
+              if (!(nextParsed.kind === "agent_event" && nextParsed.data.status === "confirmed" && nextParsed.data.message.startsWith(prefix + ": "))) break;
+              values.push(nextParsed.data.message.slice(colonIdx + 2));
+              j++;
+            }
+            if (values.length > 1) {
+              result.push({
+                message: msg,
+                originalIndex: i,
+                mergedContent: JSON.stringify({ type: "agent_event", message: `${prefix}s: ${values.join(", ")}`, status: "confirmed" }),
+              });
+              i = j;
+              continue;
+            }
+          }
+        }
+      }
+      result.push({ message: msg, originalIndex: i });
+      i++;
+    }
+    return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.messages]);
 
   // Derive the current step for the header subtitle.
   // Priority: active interrupt type > latest agent_event with step info > null
@@ -173,32 +252,55 @@ export function HeadlessChat({
       }
     >
       <ChatErrorBoundary mode="inline" projectName={projectName}>
-        {agent.messages.map((message, index) => {
+        {displayMessages.map(({ message, originalIndex, mergedContent }) => {
           const priorAssistant = agent.messages
-            .slice(0, index)
+            .slice(0, originalIndex)
             .filter((m) => m.role === "assistant")
             .map((m) => m.content);
 
+          // Interrupt context bubbles inserted AFTER this message's original index.
+          // Captured when the interrupt fired; persist after pending clears.
+          const contextsHere = interruptContexts.filter((c) => c.afterIndex === originalIndex);
+
           return (
-            <div
-              key={message.id}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              {message.role === "user" ? (
-                <div className="max-w-[85%] rounded-2xl bg-[var(--muted)] px-5 py-4 text-sm text-[var(--foreground)]">
-                  <p className="whitespace-pre-wrap">
-                    {extractMessageText(message.content)}
-                  </p>
-                </div>
-              ) : (
-                <AgentMessageBubble
-                  content={message.content}
-                  priorAssistantContents={priorAssistant}
-                />
-              )}
-            </div>
+            <Fragment key={message.id}>
+              <div className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                {message.role === "user" ? (
+                  <div className="max-w-[85%] rounded-2xl bg-[var(--muted)] px-5 py-4 text-sm text-[var(--foreground)]">
+                    <p className="whitespace-pre-wrap">
+                      {extractMessageText(message.content)}
+                    </p>
+                  </div>
+                ) : (
+                  <AgentMessageBubble
+                    content={mergedContent ?? message.content}
+                    priorAssistantContents={priorAssistant}
+                  />
+                )}
+              </div>
+
+              {contextsHere.map((ctx, ci) => (
+                <Fragment key={`ictx-${originalIndex}-${ci}`}>
+                  {ctx.message && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[85%] rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 text-sm text-[var(--foreground)] shadow-sm">
+                        <p className="whitespace-pre-wrap">{ctx.message}</p>
+                      </div>
+                    </div>
+                  )}
+                  {ctx.hint && (
+                    <div className="flex justify-start">
+                      <div className="max-w-[85%] rounded-2xl border border-[var(--border)] bg-[var(--muted)] px-5 py-3 text-sm text-[var(--muted-foreground)] shadow-sm">
+                        <p className="whitespace-pre-wrap italic">{ctx.hint}</p>
+                      </div>
+                    </div>
+                  )}
+                </Fragment>
+              ))}
+            </Fragment>
           );
         })}
+
         {agent.isRunning && (
           <div className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
             <Spinner size="sm" />

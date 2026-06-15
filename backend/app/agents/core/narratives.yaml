@@ -16,6 +16,16 @@ intent:
     subtitle: "Setup complete"
     message: "Ready to map {object} from {source_label} to {dest_label}."
 
+connection:
+  source_connection:
+    in_progress: "Checking your {source_label} connection…"
+    confirmed: "Source Connected: {source_label}"
+  object:
+    confirmed: "Object: {object} from {source_label}"
+  channel_connections:
+    in_progress: "Checking your ad platform connections…"
+    confirmed: "All connections verified."
+
 canonical:
   bridge:
     in_progress: "Before mapping to {dest_label}, I'll map {object} from {source_label} to the Datahash canonical structure."

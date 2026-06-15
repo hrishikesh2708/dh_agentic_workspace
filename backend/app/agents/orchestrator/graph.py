@@ -1,84 +1,68 @@
-"""Supervisor graph — sequences the 6 worker sub-graphs.
-
-The supervisor is a thin sequencer (no LLM routing in v1). Same worker is
-invoked twice in projection runs: once with ``mapping_kind=canonical``
-(default), then again with ``mapping_kind=projection`` after the
-``prepare_projection`` node flips state.
-
-Two compile entry points:
-
-- :func:`build_studio_graph` — no checkpointer (for ``langgraph dev``).
-- :func:`build_app_graph` — Postgres-backed checkpointer (Stage 3 FastAPI mount).
-
-**UI dev mode:** the compiled graph currently runs welcome + intent only.
-Restore the full pipeline from git history when UI testing is complete.
-"""
+"""Supervisor graph — sequences the worker sub-graphs."""
 
 from __future__ import annotations
 
 from typing import Optional
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
-from langgraph.graph import (
-    END,
-    START,
-    StateGraph,
-)
+from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from app.agents.orchestrator.state import GlobalAgentState
-from app.agents.workers.intent_worker.graph import wire_intent_phase
+from app.agents.workers.connection_worker.graph import wire_connection_phase
+from app.agents.workers.intent_worker.graph import route_after_intent, wire_intent_phase
+from app.agents.workers.mapping_worker.graph import wire_mapping_phase
 from app.agents.workers.welcome_worker.tools import route_after_welcome, welcome_user
 
 
 def _build_supervisor() -> StateGraph:
-    """Construct the supervisor :class:`StateGraph` (uncompiled).
-
-    Returns a :class:`StateGraph`. Callers compile with the appropriate
-    checkpointer.
-    """
     g = StateGraph(GlobalAgentState)
 
-    # --- Phase 0: welcome (on chat connect) ---
+    # Phase 0: welcome
     g.add_node("welcome", welcome_user)
 
-    # --- Phase 1: intent (flattened — see wire_intent_phase docstring) ---
+    # Phase 1: intent (flattened)
     intent_entry = wire_intent_phase(g)
 
-    # --- Edges ---
+    # Phase 3: mapping (registered first so the entry node name is known
+    # before wire_connection_phase wires its exit route)
+    mapping_entry = wire_mapping_phase(g)
+
+    # Phase 2: connection (flattened — routes directly to mapping_entry when done)
+    connection_entry = wire_connection_phase(g, next_phase_entry=mapping_entry)
+
+    # Edges
     g.add_edge(START, "welcome")
     g.add_conditional_edges(
         "welcome",
         route_after_welcome,
         {
             "intent": intent_entry,
+            "handle_clarification": "handle_clarification",
+            "handle_confirmation": "handle_confirmation",
             END: END,
         },
     )
+
+    # Intent complete → connection phase
+    g.add_conditional_edges(
+        "handle_confirmation",
+        route_after_intent,
+        {"connection_phase": connection_entry, END: END},
+    )
+    # Connection → mapping is wired internally by wire_connection_phase via
+    # _make_conn_router(next_phase_entry=mapping_entry). No explicit edge needed.
 
     return g
 
 
 def build_studio_graph() -> CompiledStateGraph:
-    """Compile the supervisor without a checkpointer (for LangGraph Studio).
-
-    The ``langgraph dev`` CLI injects its own in-memory checkpointer at
-    runtime, so we leave that slot unfilled here.
-    """
+    """Compile the supervisor graph without a checkpointer (``langgraph dev``)."""
     return _build_supervisor().compile(name="datahash_agent")
 
 
 def build_app_graph(checkpointer: Optional[BaseCheckpointSaver] = None) -> CompiledStateGraph:
-    """Compile the supervisor for the FastAPI app (Stage 3).
-
-    Args:
-        checkpointer: Async Postgres saver from the FastAPI lifespan. ``None``
-            is permitted so the app boots in degraded mode if Postgres is
-            unavailable in production.
-
-    Returns:
-        The compiled supervisor :class:`CompiledStateGraph`.
-    """
+    """Compile the supervisor graph with an optional Postgres checkpointer."""
     return _build_supervisor().compile(
         checkpointer=checkpointer,
         name="datahash_agent",

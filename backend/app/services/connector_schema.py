@@ -43,6 +43,7 @@ from app.schemas.agent.types import (
     CanonicalSchema,
 )
 from app.models.canonical_field import CanonicalField
+from app.agents.core.intent_validation import destination_platform_id
 
 
 def _connector_stmt(*where_clauses):
@@ -52,12 +53,27 @@ def _connector_stmt(*where_clauses):
 
 def _catalog_option_from_connector(connector: Connector) -> dict[str, Any]:
     """Normalise a connector row into the catalog/picker option shape."""
+    platform_id = destination_platform_id(connector.sub_connector_of, connector.connector_slug)
+    label = connector.parent.display_name if connector.parent else connector.display_name
     return {
-        "id": connector.connector_slug,
-        "label": connector.display_name,
+        "id": platform_id,
+        "label": label,
         "description": "",
         "enabled": connector.status == ConnectorStatus.active,
     }
+
+
+def _dedupe_destination_options(options: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse sub-connector rows to one option per platform slug."""
+    by_platform: dict[str, dict[str, Any]] = {}
+    for option in options:
+        platform_id = str(option["id"]).lower()
+        existing = by_platform.get(platform_id)
+        if existing is None:
+            by_platform[platform_id] = dict(option)
+            continue
+        existing["enabled"] = bool(existing.get("enabled")) or bool(option.get("enabled"))
+    return list(by_platform.values())
 
 
 class DestinationRegistryService:
@@ -195,7 +211,7 @@ class CatalogService:
         async with self._session_maker() as db:
             result = await db.execute(stmt)
             connectors = list(result.scalars().all())
-            return [_catalog_option_from_connector(c) for c in connectors]
+            return _dedupe_destination_options([_catalog_option_from_connector(c) for c in connectors])
 
     async def destination_label(self, dest_id: str) -> str:
         """Resolve a destination ID to its human-readable label."""
@@ -203,9 +219,18 @@ class CatalogService:
         return self._label_from_options(dest_id, options)
 
     async def enabled_destination_ids(self) -> set[str]:
-        """Set of selectable (active) destination IDs (lowercased)."""
-        options = await self.list_destination_options()
-        return {o["id"].lower() for o in options if o.get("enabled", True)}
+        """Set of selectable (active) destination platform IDs (lowercased).
+
+        Uses ``sub_connector_of`` when set, otherwise ``connector_slug``.
+        """
+        stmt = _connector_stmt(
+            cast(col(Connector.connector_type), String) == ConnectorType.destination.value,
+            cast(col(Connector.status), String) == ConnectorStatus.active.value,
+        )
+        async with self._session_maker() as db:
+            result = await db.execute(stmt)
+            connectors = list(result.scalars().all())
+        return {destination_platform_id(c.sub_connector_of, c.connector_slug).lower() for c in connectors}
 
     @staticmethod
     def _label_from_options(dest_id: str, options: list[dict]) -> str:

@@ -83,12 +83,17 @@ export type ApprovalInterruptPayload = {
   // select_channels (multi-select)
   min_select?: number;
   max_select?: number;
+  // Common fields — present on most interrupt types
+  title?: string;           // section label at top of card (e.g. "SALESFORCE OBJECT — SUGGESTED FIRST")
+  message?: string;         // context question shown inside the card (all interrupt types)
+  hint?: string;            // guidance shown below the options/list
+  recommended?: string;     // pre-selected / suggested option id (source, object)
+  confidence?: string;      // "high" | "medium" | "low" — badge on recommended option
   // check_connection
   source_label?: string;
   // "not_connected" | "expired" | "connected"
   connection_status?: string;
   account_detail?: string;  // e.g. "Acme Corp · john@acme.com" — shown when connected
-  message?: string;         // status description (check_connection only — shown in the card)
   // mapping_review (row-based, single or multi-destination)
   destinations?: MappingDestination[];
   rows?: MappingReviewRow[];

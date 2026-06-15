@@ -57,6 +57,11 @@ _NARRATOR_SYSTEM = """Summarize the user's mapping goal in one friendly sentence
 Return ONLY JSON: {"message": "<one sentence>"}
 Use ONLY the validated fields listed. Do not mention sources, objects, or destinations that are not in the validated list."""
 
+_PARSE_ACK_SYSTEM = """You are confirming what you understood from the user's data mapping request.
+Write one short, friendly sentence summarising their goal.
+Mention signal type (e.g. "offline conversions"), source, object, and destinations only when they appear in the parsed fields.
+Return ONLY JSON: {"message": "<one sentence>"}"""
+
 
 async def destination_label(dest_id: str) -> str:
     """Resolve a destination ID to its label via the catalog."""
@@ -197,6 +202,76 @@ async def intent_narrator_message(
     if destination_type:
         payload["destination_type"] = destination_type
         payload["destination_label"] = dest_label
+    return AIMessage(content=json.dumps(payload))
+
+
+async def intent_parse_ack_message(
+    user_text: str,
+    *,
+    signal_type: str | None,
+    source_label_str: str,
+    source_object: str,
+    destination_labels: list[str],
+) -> AIMessage | None:
+    """LLM-generated contextual ack emitted by parse_initial_intent (Layer 1).
+
+    Replaces ``intent_narrator_message`` for the initial parse step.
+    Returns ``None`` when there is nothing useful to ack (no parsed slots at all).
+    """
+    parts: list[str] = []
+    if signal_type:
+        parts.append(f"signal type: {signal_type.replace('_', ' ')}")
+    if source_label_str:
+        parts.append(f"source: {source_label_str}")
+    if source_object:
+        parts.append(f"object: {source_object}")
+    if destination_labels:
+        parts.append(f"destinations: {', '.join(destination_labels)}")
+
+    if not parts:
+        return None
+
+    message = ""
+    if deps.openai.client:
+        try:
+            context = f"User message: {user_text}\nParsed fields: {'; '.join(parts)}"
+            parsed = await deps.openai.chat_json(_PARSE_ACK_SYSTEM, context)
+            message = str(parsed.get("message") or "").strip()
+        except Exception:
+            pass
+
+    if not message:
+        # Fallback template — compose from available slots
+        if source_label_str and source_object and destination_labels:
+            dest_str = " and ".join(destination_labels)
+            message = f"Got it — I'll map {source_object} from {source_label_str} to {dest_str}."
+        elif source_label_str and destination_labels:
+            dest_str = " and ".join(destination_labels)
+            message = f"Got it — I'll connect {source_label_str} to {dest_str}."
+        elif source_label_str and source_object:
+            message = f"Got it — mapping {source_object} from {source_label_str}."
+        elif destination_labels:
+            dest_str = " and ".join(destination_labels)
+            message = f"Got it — I'll set up a mapping to {dest_str}."
+        elif source_label_str:
+            message = f"Got it — using {source_label_str} as the source."
+        else:
+            return None
+
+    payload: dict[str, Any] = {
+        "type": "intent_ack",
+        "event": "parse_ack",
+        "message": message,
+        "phase": INTENT_PHASE,
+    }
+    if signal_type:
+        payload["signal_type"] = signal_type
+    if source_label_str:
+        payload["source_label"] = source_label_str
+    if source_object:
+        payload["source_object"] = source_object
+    if destination_labels:
+        payload["destination_labels"] = destination_labels
     return AIMessage(content=json.dumps(payload))
 
 

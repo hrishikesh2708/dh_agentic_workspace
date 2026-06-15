@@ -29,25 +29,45 @@ from app.schemas.agent.types import (
 
 
 class GlobalAgentState(BaseModel):
-    """Unified state for the supervisor + worker sub-graphs.
+    """Shared LangGraph state for the supervisor and all worker sub-graphs."""
 
-    Naming preserved from crawler_agent (`customer_id` / `session_id` as
-    ``int``) so the pipeline + persistence code ports verbatim. They'll be
-    reconciled with the framework's ``user_id`` / ``Session.id`` in Stage 2
-    when the DB models land.
-    """
-
-    # --- Conversation channel (LangGraph reducer) ---
+    # --- Conversation channel ---
     messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
 
-    # --- Run mode + intent (Phase 1: intent_worker) ---
-    run_mode: str = "canonical_only"
+    # --- Intent phase tracking ---
+    intent_phase: str = "idle"
+    intent_phase_complete: bool = False
+    pending_clarification: str | None = None
+    clarifications_asked: list[str] = Field(default_factory=list)
+
+    # --- Intent slots ---
+    signal_type: str | None = None
+    signal_type_confidence: str | None = None
     source: Sources | None = None
     source_object: str = ""
-    destination_type: str = ""
+    destinations: list[str] = Field(default_factory=list)
     available_objects: list[str] = Field(default_factory=list)
+    intent_summary: str | None = None
 
-    # --- Working data (Phase 2/3: schema/mapper/reviewer/learning) ---
+    # --- Connection phase tracking ---
+    source_connected: bool = False
+    channel_statuses: dict[str, str] = Field(default_factory=dict)
+    connection_phase_complete: bool = False
+
+    # --- Mapping phase tracking ---
+    required_canonical_keys: list[str] = Field(default_factory=list)
+    # Each entry: {canonical_key, field_label, field_hint, field_category, is_pii}
+    canonical_field_details: list[dict] = Field(default_factory=list)
+    canonical_mapping_approved: bool = False
+    resolve_fields_done: bool = False
+    mapping_complete_shown: bool = False
+    mapping_phase_complete: bool = False
+    pipeline_activated: bool = False
+
+    # --- Run mode (synced from destinations) ---
+    run_mode: str = "canonical_only"
+
+    # --- Working data ---
     source_schema: SourceSchema | None = None
     destination_schema: DestinationSchema | None = None
     mappings: list[ProposedMapping] = Field(default_factory=list)
@@ -61,3 +81,9 @@ class GlobalAgentState(BaseModel):
     has_pending_review: bool = False
     canonical_summary_shown: bool = False
     vector_search_destination_type: str | None = None
+
+    # --- Backward compat ---
+    @property
+    def destination_type(self) -> str:
+        """First destination slug; empty when none selected."""
+        return self.destinations[0] if self.destinations else ""
