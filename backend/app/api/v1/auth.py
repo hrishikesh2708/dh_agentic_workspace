@@ -34,14 +34,12 @@ from app.schemas import (
     UserResponse,
 )
 from app.services.database import DatabaseService
-from app.utils.auth import (
+from app.utils import (
     create_access_token,
-    verify_token,
-)
-from app.utils.sanitization import (
     sanitize_email,
     sanitize_string,
     validate_password_strength,
+    verify_token,
 )
 
 router = APIRouter()
