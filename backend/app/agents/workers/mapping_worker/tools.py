@@ -9,8 +9,8 @@ from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 from sqlmodel import col, select
 
-from app.agents.core import deps
-from app.agents.core.intent_validation import source_connector_id
+from app.agents import deps
+from app.agents.intent_validation import source_connector_id
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.metrics import hitl_interruptions_total
 from app.models import CanonicalField

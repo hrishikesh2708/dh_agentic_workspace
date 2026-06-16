@@ -8,12 +8,12 @@ from typing import Any
 from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 
-from app.agents.core import deps
-from app.agents.core.constants import (
+from app.agents import deps
+from app.agents.constants import (
     INTENT_PHASE,
 )
 from app.core.metrics import hitl_interruptions_total
-from app.agents.core.intent_validation import (
+from app.agents.intent_validation import (
     canonicalize_object_name,
     destination_platform_id,
     enabled_source_ids_from_options,
@@ -25,7 +25,7 @@ from app.agents.core.intent_validation import (
     source_connector_id,
     source_label_from,
 )
-from app.agents.core.messages import (
+from app.agents.messages import (
     intent_complete_message,
     intent_gather_event,
     intent_parse_ack_message,

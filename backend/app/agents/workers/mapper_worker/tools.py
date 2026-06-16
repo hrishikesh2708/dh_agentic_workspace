@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.agents.core.agent_config import _AgentSettingsProxy
+from app.agents.agent_config import _AgentSettingsProxy
 from app.services.openai_client import OpenAIService
 from app.services.vector_store import VectorStoreService
 from app.core.logging import logger
 from app.schemas import ProposedMapping
 
-_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "core" / "prompts" / "mapper_system.txt"
+_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "mapper_system.txt"
 
 
 class MapperAgent:

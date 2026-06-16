@@ -11,7 +11,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from app.agents.core.agent_config import _AgentSettingsProxy
+from app.agents.agent_config import _AgentSettingsProxy
 
 
 class OpenAIService:

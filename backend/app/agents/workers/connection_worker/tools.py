@@ -10,8 +10,8 @@ from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
 from sqlmodel import Session, select
 
-from app.agents.core import deps
-from app.agents.core.intent_validation import (
+from app.agents import deps
+from app.agents.intent_validation import (
     canonicalize_object_name,
     enabled_source_ids_from_options,
     first_enabled_source_id_from_options,
@@ -19,7 +19,7 @@ from app.agents.core.intent_validation import (
     normalize_optional_str,
     source_connector_id,
 )
-from app.agents.core.messages import intent_gather_event
+from app.agents.messages import intent_gather_event
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.logging import logger
 from app.core.metrics import hitl_interruptions_total
@@ -48,7 +48,7 @@ async def _source_catalog() -> tuple[list[dict], set[str], str]:
 
 
 async def _coerce_source(source_id: str):
-    from app.agents.core.intent_validation import source_label_from
+    from app.agents.intent_validation import source_label_from
     from app.schemas import Sources
 
     needle = source_id.lower().strip()
@@ -382,7 +382,7 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
     # Falling back to last_user_text risks using "yes" / "looks good" (the
     # confirmation reply) instead of the original intent message, which gives
     # the LLM no signal to infer the object from.
-    from app.agents.core.messages import last_user_text
+    from app.agents.messages import last_user_text
 
     user_intent = state.intent_summary or last_user_text(state.messages or [])
     inferred = await _infer_source_object(

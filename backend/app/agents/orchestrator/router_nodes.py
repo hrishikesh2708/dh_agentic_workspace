@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agents.core.messages import mapping_complete_message
+from app.agents.messages import mapping_complete_message
 from app.agents.orchestrator.state import GlobalAgentState
 from app.schemas import MappingKind
 

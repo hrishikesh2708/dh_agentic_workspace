@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.agents.core.agent_config import _AgentSettingsProxy
+from app.agents.agent_config import _AgentSettingsProxy
 
 
 class VectorStoreService:

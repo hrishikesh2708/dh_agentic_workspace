@@ -14,7 +14,7 @@ from uuid import UUID
 
 import httpx
 
-from app.agents.core.agent_config import _AgentSettingsProxy
+from app.agents.agent_config import _AgentSettingsProxy
 from app.core.logging import logger
 from app.schemas import SourceField, SourceSchema
 

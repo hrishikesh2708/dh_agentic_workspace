@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 
-from app.agents.core.agent_config import (
+from app.agents.agent_config import (
     _AgentSettingsProxy,
     resolve_agent_path,
 )

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.agents.api.routes import router as copilotkit_router
+from app.agents.routes import router as copilotkit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.connections import router as connections_router
 from app.api.v1.projects import router as projects_router

@@ -8,14 +8,14 @@ from typing import Any
 from langchain_core.messages import AIMessage, BaseMessage
 from langgraph.graph import END
 
-from app.agents.core import deps
-from app.agents.core.messages import last_user_text
+from app.agents import deps
+from app.agents.messages import last_user_text
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.logging import logger
 from app.services.database import database_service
 
 # All agent prompts live here
-_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "core" / "prompts" / "welcome_message.txt"
+_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "prompts" / "welcome_message.txt"
 
 
 def _welcome_already_sent(messages: list[BaseMessage]) -> bool:

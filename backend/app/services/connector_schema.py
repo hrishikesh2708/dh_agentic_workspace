@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
 
-from app.agents.core.agent_config import (
+from app.agents.agent_config import (
     _AgentSettingsProxy,
 )
 from app.models import Connector, ConnectorStatus, ConnectorType
@@ -43,7 +43,7 @@ from app.schemas import (
     CanonicalSchema,
 )
 from app.models import CanonicalField
-from app.agents.core.intent_validation import destination_platform_id
+from app.agents.intent_validation import destination_platform_id
 
 
 def _connector_stmt(*where_clauses):

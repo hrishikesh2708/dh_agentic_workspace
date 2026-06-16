@@ -7,7 +7,7 @@ from typing import Hashable, cast
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from app.agents.core.intent_validation import normalize_optional_str, source_connector_id
+from app.agents.intent_validation import normalize_optional_str, source_connector_id
 from app.agents.orchestrator.state import GlobalAgentState
 from app.agents.workers.connection_worker.tools import (
     _SUPPORTED_OBJECT_SOURCES,

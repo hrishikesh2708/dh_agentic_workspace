@@ -25,19 +25,19 @@ from langchain_core.messages import (
     HumanMessage,
 )
 
-from app.agents.core import deps
-from app.agents.core.constants import (
+from app.agents import deps
+from app.agents.constants import (
     INTENT_PHASE,
     source_label,
 )
-from app.agents.core.intent_validation import (
+from app.agents.intent_validation import (
     canonicalize_object_name,
     is_valid_destination,
     is_valid_source,
     normalize_optional_str,
     source_connector_id,
 )
-from app.agents.core.narratives import (
+from app.agents.narratives import (
     CANONICAL_LABEL,
     CANONICAL_STEP_INDEX,
     CANONICAL_STEP_TOTAL,

@@ -53,8 +53,8 @@ from typing import Hashable, cast
 from langgraph.graph import END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from app.agents.core import deps
-from app.agents.core.intent_validation import (
+from app.agents import deps
+from app.agents.intent_validation import (
     is_valid_source,
     normalize_optional_str,
     source_connector_id,

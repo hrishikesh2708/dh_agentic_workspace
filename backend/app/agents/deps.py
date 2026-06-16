@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.agents.core.agent_config import agent_settings
+from app.agents.agent_config import agent_settings
 from app.services.openai_client import OpenAIService
 from app.services.salesforce_client import SalesforceClient
 from app.services.vector_store import VectorStoreService
