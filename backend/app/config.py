@@ -241,6 +241,23 @@ class Settings:
         self.SALESFORCE_CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID", "")
         self.SALESFORCE_CLIENT_SECRET = os.getenv("SALESFORCE_CLIENT_SECRET", "")
         self.SALESFORCE_AUTH_URL = os.getenv("SALESFORCE_AUTH_URL", "https://login.salesforce.com")
+
+        # Meta (Facebook) integration
+        self.META_APP_ID = os.getenv("META_APP_ID", "")
+        self.META_APP_SECRET = os.getenv("META_APP_SECRET", "")
+
+        # Google integration
+        self.GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+        self.GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+
+        # TikTok integration
+        self.TIKTOK_APP_ID = os.getenv("TIKTOK_APP_ID", "")
+        self.TIKTOK_APP_SECRET = os.getenv("TIKTOK_APP_SECRET", "")
+
+        # Snapchat integration
+        self.SNAPCHAT_CLIENT_ID = os.getenv("SNAPCHAT_CLIENT_ID", "")
+        self.SNAPCHAT_CLIENT_SECRET = os.getenv("SNAPCHAT_CLIENT_SECRET", "")
+
         # Base URL used to build OAuth callback URIs.
         # Must exactly match what is registered in each provider's app settings.
         # Defaults to http://localhost:8000 for local dev.

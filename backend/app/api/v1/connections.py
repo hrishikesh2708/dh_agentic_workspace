@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 from typing import Any
 from uuid import UUID
@@ -63,28 +62,28 @@ def _get_connector_oauth_config(connector_slug: str) -> dict[str, str]:
             "client_secret": settings.SALESFORCE_CLIENT_SECRET,
         },
         "meta_capi": {
-            "authorize_url": "https://www.facebook.com/v19.0/dialog/oauth",
-            "token_url": "https://graph.facebook.com/v19.0/oauth/access_token",
-            "client_id": os.getenv("META_APP_ID", ""),
-            "client_secret": os.getenv("META_APP_SECRET", ""),
+            "authorize_url": "https://www.facebook.com/v21.0/dialog/oauth",
+            "token_url": "https://graph.facebook.com/v21.0/oauth/access_token",
+            "client_id": settings.META_APP_ID,
+            "client_secret": settings.META_APP_SECRET,
         },
         "google_ads": {
             "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
             "token_url": "https://oauth2.googleapis.com/token",
-            "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
-            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
         },
         "tiktok": {
             "authorize_url": "https://www.tiktok.com/v2/auth/authorize/",
             "token_url": "https://open.tiktokapis.com/v2/oauth/token/",
-            "client_id": os.getenv("TIKTOK_APP_ID", ""),
-            "client_secret": os.getenv("TIKTOK_APP_SECRET", ""),
+            "client_id": settings.TIKTOK_APP_ID,
+            "client_secret": settings.TIKTOK_APP_SECRET,
         },
         "snapchat": {
             "authorize_url": "https://accounts.snapchat.com/login/oauth2/authorize",
             "token_url": "https://accounts.snapchat.com/login/oauth2/access_token",
-            "client_id": os.getenv("SNAPCHAT_CLIENT_ID", ""),
-            "client_secret": os.getenv("SNAPCHAT_CLIENT_SECRET", ""),
+            "client_id": settings.SNAPCHAT_CLIENT_ID,
+            "client_secret": settings.SNAPCHAT_CLIENT_SECRET,
         },
     }
     cfg = configs.get(connector_slug)
@@ -247,6 +246,12 @@ async def authorize(
     }
     if connector_slug in scopes:
         params["scope"] = scopes[connector_slug]
+
+    # Google requires these to receive a refresh_token; without them the token
+    # response omits refresh_token entirely and the connection breaks after 1h.
+    if connector_slug == "google_ads":
+        params["access_type"] = "offline"
+        params["prompt"] = "consent"
 
     import urllib.parse
 
