@@ -85,7 +85,7 @@ async def _route_next(state: GlobalAgentState) -> str:
 
     Priority order:
     1. Phase-based routing (clarifying / confirming / complete) — overrides all
-    2. Slot-based routing — fills missing slots in dependency order
+    2. Slot-based routing — signal_type → source → destinations
     3. Confirmation — all slots filled, needs user sign-off
     4. Complete — hand off to connection phase (returns END for now)
     """
@@ -101,6 +101,12 @@ async def _route_next(state: GlobalAgentState) -> str:
         return END
 
     # --- Priority 2: Slot validation (dependency order) -------------------------
+    # Signal type first — establishes *what* the user is trying to do and
+    # contextualises source/destination options shown in subsequent steps.
+    if not state.signal_type:
+        return "handle_clarification"
+
+    # Source second — *where* the data lives.
     source_id = source_connector_id(state.source)
     source = normalize_optional_str(source_id) or ""
     valid_source_ids = await deps.connector_schema.enabled_source_ids()
@@ -108,14 +114,10 @@ async def _route_next(state: GlobalAgentState) -> str:
     if not is_valid_source(source, valid_source_ids):
         return "gather_source"
 
+    # Destinations last — *where* the data should go.
     valid_dest_ids = await deps.connector_schema.enabled_destination_ids()
     if not _has_valid_destinations(state.destinations, valid_dest_ids):
         return "gather_destinations"
-
-    # Signal type is checked last — parse_initial_intent may have already set it;
-    # we only send to clarification if it's still missing after all gather nodes ran
-    if not state.signal_type:
-        return "handle_clarification"
 
     # --- Priority 3: Confirmation ------------------------------------------------
     if not state.intent_phase_complete and state.intent_phase != "confirming":
