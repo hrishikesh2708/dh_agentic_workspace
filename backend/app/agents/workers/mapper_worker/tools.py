@@ -13,7 +13,7 @@ from app.agents.core.agent_config import _AgentSettingsProxy
 from app.agents.shared_tools.openai_client import OpenAIService
 from app.agents.shared_tools.vector_store import VectorStoreService
 from app.core.logging import logger
-from app.schemas.agent.types import ProposedMapping
+from app.schemas import ProposedMapping
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "core" / "prompts" / "mapper_system.txt"
 

@@ -16,7 +16,7 @@ import httpx
 
 from app.agents.core.agent_config import _AgentSettingsProxy
 from app.core.logging import logger
-from app.schemas.agent.types import SourceField, SourceSchema
+from app.schemas import SourceField, SourceSchema
 
 
 @runtime_checkable
@@ -68,8 +68,8 @@ class SalesforceClient:
         """Load access_token + instance_url from ProjectConnectionSecret."""
         from sqlmodel import Session, select
 
-        from app.models.project_connection import ProjectConnection, ProjectConnectionStatus
-        from app.models.project_connection_secret import ProjectConnectionSecret
+        from app.models import ProjectConnection, ProjectConnectionStatus
+        from app.models import ProjectConnectionSecret
         from app.services.database import database_service
 
         with Session(database_service.engine) as db:
@@ -144,8 +144,8 @@ class SalesforceClient:
         if self.project_id:
             from sqlmodel import Session, select
 
-            from app.models.project_connection import ProjectConnection, ProjectConnectionStatus
-            from app.models.project_connection_secret import ProjectConnectionSecret
+            from app.models import ProjectConnection, ProjectConnectionStatus
+            from app.models import ProjectConnectionSecret
             from app.services.database import database_service
 
             with Session(database_service.engine) as db:

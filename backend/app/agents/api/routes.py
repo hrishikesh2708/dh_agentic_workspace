@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.v1.auth import get_current_session
 from app.core.logging import logger
-from app.models.session import Session
+from app.models import Session
 
 router = APIRouter()
 

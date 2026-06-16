@@ -11,7 +11,7 @@ from typing import Any
 
 from app.agents.core.messages import mapping_complete_message
 from app.agents.orchestrator.state import GlobalAgentState
-from app.schemas.agent.types import MappingKind
+from app.schemas import MappingKind
 
 
 # -----------------------------------------------------------------------------
@@ -58,9 +58,7 @@ def route_post_projection_reviewer(state: GlobalAgentState) -> str:
 async def prepare_projection_node(state: GlobalAgentState) -> dict[str, Any]:
     """Flip state into projection mode before the second schema/mapper/reviewer pass.
 
-    The actual state rewiring (canonical-output → projection-source) happens
-    inside ``schema_worker._setup_projection``; this node only flips the
-    ``mapping_kind`` flag and resets the per-stage HITL toggle.
+    Flips ``mapping_kind`` to projection and resets the per-stage HITL toggle.
     """
     _ = state  # state read happens downstream; nothing to read here
     return {

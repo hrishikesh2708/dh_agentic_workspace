@@ -17,7 +17,7 @@ from app.agents.core.agent_config import (
     _AgentSettingsProxy,
     resolve_agent_path,
 )
-from app.schemas.agent.types import DestinationSchema
+from app.schemas import DestinationSchema
 
 
 def _catalog_option_from_raw(raw: dict[str, Any], *, fallback_id: str) -> dict[str, Any]:

@@ -23,7 +23,7 @@ from app.agents.core.messages import intent_gather_event
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.logging import logger
 from app.core.metrics import hitl_interruptions_total
-from app.models.project_connection import ProjectConnection, ProjectConnectionStatus
+from app.models import ProjectConnection, ProjectConnectionStatus
 from app.services.database import database_service
 
 CONNECTION_PHASE = "connection"
@@ -49,7 +49,7 @@ async def _source_catalog() -> tuple[list[dict], set[str], str]:
 
 async def _coerce_source(source_id: str):
     from app.agents.core.intent_validation import source_label_from
-    from app.schemas.agent.types import Sources
+    from app.schemas import Sources
 
     needle = source_id.lower().strip()
     sources = await deps.source_registry.list_source()

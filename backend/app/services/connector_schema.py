@@ -32,9 +32,9 @@ from sqlmodel import col, select
 from app.agents.core.agent_config import (
     _AgentSettingsProxy,
 )
-from app.models.connector import Connector, ConnectorStatus, ConnectorType
-from app.models.destination_field_mapping import DestinationFieldMapping
-from app.schemas.agent.types import (
+from app.models import Connector, ConnectorStatus, ConnectorType
+from app.models import DestinationFieldMapping
+from app.schemas import (
     DestinationField,
     DestinationSchema,
     Sources,
@@ -42,7 +42,7 @@ from app.schemas.agent.types import (
     CanonicalSchemaField,
     CanonicalSchema,
 )
-from app.models.canonical_field import CanonicalField
+from app.models import CanonicalField
 from app.agents.core.intent_validation import destination_platform_id
 
 

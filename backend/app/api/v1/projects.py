@@ -14,8 +14,8 @@ from app.api.v1.auth import get_current_user
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.logging import logger
-from app.models.user import User
-from app.schemas.project import (
+from app.models import User
+from app.schemas import (
     ProjectCreate,
     ProjectListResponse,
     ProjectRead,

@@ -13,9 +13,9 @@ from app.agents.core import deps
 from app.agents.core.intent_validation import source_connector_id
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.metrics import hitl_interruptions_total
-from app.models.canonical_field import CanonicalField
-from app.models.destination_field_mapping import DestinationFieldMapping
-from app.schemas.agent.types import (
+from app.models import CanonicalField
+from app.models import DestinationFieldMapping
+from app.schemas import (
     DestinationField,
     DestinationSchema,
     MappingStatus,

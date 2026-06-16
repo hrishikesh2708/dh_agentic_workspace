@@ -20,7 +20,7 @@ from pydantic import (
     Field,
 )
 
-from app.schemas.agent.types import (
+from app.schemas import (
     DestinationSchema,
     MappingKind,
     ProposedMapping,

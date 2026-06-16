@@ -8,7 +8,7 @@ circular import.
 
 from __future__ import annotations
 
-from app.schemas.agent.types import Destinations, Sources
+from app.schemas import Destinations, Sources
 
 
 def source_connector_id(source: Sources | None, *, fallback: str = "") -> str:

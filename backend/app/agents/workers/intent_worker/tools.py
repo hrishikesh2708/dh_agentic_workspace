@@ -32,7 +32,7 @@ from app.agents.core.messages import (
     last_user_text,
 )
 from app.agents.orchestrator.state import GlobalAgentState
-from app.schemas.agent.types import Sources
+from app.schemas import Sources
 
 _MAPPING_RESET_KEYS: dict[str, Any] = {
     "mappings": [],

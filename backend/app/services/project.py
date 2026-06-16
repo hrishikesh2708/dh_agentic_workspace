@@ -15,7 +15,7 @@ from sqlmodel import (
 )
 
 from app.core.logging import logger
-from app.models.project import Project
+from app.models import Project
 from app.services.database import DatabaseService
 
 _db = DatabaseService()

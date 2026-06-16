@@ -13,7 +13,7 @@ from jwt.exceptions import PyJWTError
 
 from app.core.config import settings
 from app.core.logging import logger
-from app.schemas.auth import Token
+from app.schemas import Token
 from app.utils.sanitization import sanitize_string
 
 

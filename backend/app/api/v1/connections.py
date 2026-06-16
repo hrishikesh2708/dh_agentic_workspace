@@ -38,12 +38,12 @@ from sqlmodel import Session, select
 from app.api.v1.auth import get_current_user
 from app.core.config import settings
 from app.core.logging import logger
-from app.models.connector import Connector
-from app.models.oauth_pending import OAuthPending
-from app.models.project import Project
-from app.models.project_connection import ProjectConnection, ProjectConnectionStatus
-from app.models.project_connection_secret import ProjectConnectionSecret
-from app.models.user import User
+from app.models import Connector
+from app.models import OAuthPending
+from app.models import Project
+from app.models import ProjectConnection, ProjectConnectionStatus
+from app.models import ProjectConnectionSecret
+from app.models import User
 from app.services.database import database_service
 
 router = APIRouter()

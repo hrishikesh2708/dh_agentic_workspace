@@ -25,9 +25,9 @@ from app.core.logging import (
     bind_context,
     logger,
 )
-from app.models.session import Session
-from app.models.user import User
-from app.schemas.auth import (
+from app.models import Session
+from app.models import User
+from app.schemas import (
     SessionResponse,
     TokenResponse,
     UserCreate,
