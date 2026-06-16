@@ -19,6 +19,10 @@ from app.core.logging import logger
 from app.schemas import SourceField, SourceSchema
 
 
+class SalesforceAuthError(RuntimeError):
+    """Raised on a 401 from Salesforce so callers can catch token expiry specifically."""
+
+
 @runtime_checkable
 class SourceClient(Protocol):
     """Common interface every source integration must implement."""
@@ -56,13 +60,14 @@ class SalesforceClient:
     # ------------------------------------------------------------------
 
     async def authenticate(self) -> None:
-        """Ensure _token + _instance_url are set. Prefer DB tokens."""
+        """Ensure _token + _instance_url are set from DB OAuth tokens."""
         if self._token and self._instance_url:
             return
-        if self.project_id:
-            await self._load_from_db()
-        else:
-            await self._authenticate_via_env()
+        if not self.project_id:
+            raise RuntimeError(
+                "SalesforceClient requires a project_id — username/password auth is no longer supported"
+            )
+        await self._load_from_db()
 
     async def _load_from_db(self) -> None:
         """Load access_token + instance_url from ProjectConnectionSecret."""
@@ -95,27 +100,6 @@ class SalesforceClient:
             raise RuntimeError("Salesforce DB connection is missing access_token or instance_url")
 
         logger.info("salesforce_auth_from_db", project_id=str(self.project_id))
-
-    async def _authenticate_via_env(self) -> None:
-        """Fallback: username-password OAuth flow from env vars."""
-        payload = {
-            "grant_type": "password",
-            "client_id": self.settings.salesforce_client_id,
-            "client_secret": self.settings.salesforce_client_secret,
-            "username": self.settings.salesforce_username,
-            "password": f"{self.settings.salesforce_password}{self.settings.salesforce_security_token}",
-        }
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"{self.settings.salesforce_auth_url}/services/oauth2/token",
-                data=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-        self._token = data["access_token"]
-        self._instance_url = data["instance_url"]
-        self._refresh_token = data.get("refresh_token")
-        logger.info("salesforce_auth_via_env")
 
     async def _refresh_access_token(self) -> None:
         """Use stored refresh_token to get a new access_token; update DB row."""
@@ -183,6 +167,8 @@ class SalesforceClient:
                 await self._refresh_access_token()
                 headers = {"Authorization": f"Bearer {self._token}"}
                 response = await client.get(url, headers=headers)
+            if response.status_code == 401:
+                raise SalesforceAuthError("Salesforce access token expired")
             response.raise_for_status()
             return response.json()
 
@@ -246,7 +232,11 @@ class SalesforceClient:
 
     @staticmethod
     def _normalize_field(raw_field: dict[str, Any]) -> SourceField:
-        picklist_values = [item.get("value", "") for item in raw_field.get("picklistValues", []) if item.get("value")]
+        picklist_values = [
+            item.get("value", "")
+            for item in raw_field.get("picklistValues", [])
+            if item.get("active", True) and item.get("value")
+        ]
         sample_values = []
         if raw_field.get("defaultValue") is not None:
             sample_values.append(str(raw_field["defaultValue"]))

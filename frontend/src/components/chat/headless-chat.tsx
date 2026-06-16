@@ -41,6 +41,9 @@ export function HeadlessChat({
   const lastConnectedAgentRef = useRef<typeof agent | null>(null);
   const { pending, resolve } = useHeadlessInterrupt(sessionId);
   const [draft, setDraft] = useState("");
+  // Optimistic user message — shown immediately on send, cleared once it
+  // appears in agent.messages (which lags due to server round-trip).
+  const [optimisticUserMsg, setOptimisticUserMsg] = useState<string | null>(null);
 
   // ── Picker interrupt context (message + hint) ──────────────────────────────
   // Captured into state the moment a picker interrupt arrives so the bubbles
@@ -205,11 +208,21 @@ export function HeadlessChat({
     };
   }, [agent, copilotkit, sessionId, copilotkit.runtimeConnectionStatus]);
 
+  // Clear optimistic bubble once the server echoes the message back.
+  useEffect(() => {
+    if (!optimisticUserMsg) return;
+    const arrived = agent.messages.some(
+      (m) => m.role === "user" && extractMessageText(m.content) === optimisticUserMsg,
+    );
+    if (arrived) setOptimisticUserMsg(null);
+  }, [agent.messages, optimisticUserMsg]);
+
   const sendMessage = useCallback(
     (text: string) => {
       const trimmed = text.trim();
       if (!trimmed || pending) return;
 
+      setOptimisticUserMsg(trimmed); // render immediately, before runAgent resets messages
       agent.addMessage({
         role: "user",
         id: crypto.randomUUID(),
@@ -300,6 +313,16 @@ export function HeadlessChat({
             </Fragment>
           );
         })}
+
+        {/* Optimistic user bubble — visible immediately after send, before
+            the server round-trip echoes the message back into agent.messages */}
+        {optimisticUserMsg && (
+          <div className="flex justify-end">
+            <div className="max-w-[85%] rounded-2xl bg-[var(--muted)] px-5 py-4 text-sm text-[var(--foreground)]">
+              <p className="whitespace-pre-wrap">{optimisticUserMsg}</p>
+            </div>
+          </div>
+        )}
 
         {agent.isRunning && (
           <div className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">

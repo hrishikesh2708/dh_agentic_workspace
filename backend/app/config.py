@@ -237,12 +237,9 @@ class Settings:
         self.INTERNAL_SCHEMA_DIR = os.getenv("INTERNAL_SCHEMA_DIR", "schemas/internal")
         self.INTERNAL_SCHEMA_NAME = os.getenv("INTERNAL_SCHEMA_NAME", "canonical")
 
-        # Salesforce integration (username-password OAuth)
+        # Salesforce integration (OAuth2 Authorization Code + PKCE)
         self.SALESFORCE_CLIENT_ID = os.getenv("SALESFORCE_CLIENT_ID", "")
         self.SALESFORCE_CLIENT_SECRET = os.getenv("SALESFORCE_CLIENT_SECRET", "")
-        self.SALESFORCE_USERNAME = os.getenv("SALESFORCE_USERNAME", "")
-        self.SALESFORCE_PASSWORD = os.getenv("SALESFORCE_PASSWORD", "")
-        self.SALESFORCE_SECURITY_TOKEN = os.getenv("SALESFORCE_SECURITY_TOKEN", "")
         self.SALESFORCE_AUTH_URL = os.getenv("SALESFORCE_AUTH_URL", "https://login.salesforce.com")
         # Base URL used to build OAuth callback URIs.
         # Must exactly match what is registered in each provider's app settings.

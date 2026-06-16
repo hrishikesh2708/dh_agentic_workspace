@@ -65,18 +65,6 @@ class _AgentSettingsProxy:
         return _settings.SALESFORCE_CLIENT_SECRET
 
     @property
-    def salesforce_username(self) -> str:
-        return _settings.SALESFORCE_USERNAME
-
-    @property
-    def salesforce_password(self) -> str:
-        return _settings.SALESFORCE_PASSWORD
-
-    @property
-    def salesforce_security_token(self) -> str:
-        return _settings.SALESFORCE_SECURITY_TOKEN
-
-    @property
     def salesforce_auth_url(self) -> str:
         return _settings.SALESFORCE_AUTH_URL
 

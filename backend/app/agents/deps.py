@@ -25,7 +25,6 @@ settings = agent_settings
 # --- External-service clients ---
 openai = OpenAIService(agent_settings)
 vector_store = VectorStoreService(agent_settings)
-salesforce = SalesforceClient(agent_settings)  # env-var fallback (dev / test)
 
 
 def salesforce_for_project(project_id) -> SalesforceClient:
