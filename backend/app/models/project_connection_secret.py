@@ -8,7 +8,7 @@ from typing import (
     TYPE_CHECKING,
     Optional,
 )
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlmodel import (
     Field,
@@ -44,7 +44,7 @@ class ProjectConnectionSecret(SQLModel, table=True):
         ),
     )
 
-    id: Optional[UUID] = Field(default=None, primary_key=True)
+    id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     project_connection_id: UUID = Field(foreign_key="project_connection.id", index=True)
     secret_key: str
     secret_value: str

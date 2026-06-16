@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from uuid import UUID
 
 from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
+from sqlmodel import Session, select
 
 from app.agents.core import deps
 from app.agents.core.intent_validation import (
@@ -19,7 +21,10 @@ from app.agents.core.intent_validation import (
 )
 from app.agents.core.messages import intent_gather_event
 from app.agents.orchestrator.state import GlobalAgentState
+from app.core.logging import logger
 from app.core.metrics import hitl_interruptions_total
+from app.models.project_connection import ProjectConnection, ProjectConnectionStatus
+from app.services.database import database_service
 
 CONNECTION_PHASE = "connection"
 
@@ -58,24 +63,53 @@ async def _coerce_source(source_id: str):
     )
 
 
+def _lookup_active_connection(project_id: UUID, connector_slug: str) -> ProjectConnection | None:
+    """Return an active ProjectConnection row, or None if not found."""
+    with Session(database_service.engine) as db:
+        stmt = select(ProjectConnection).where(
+            ProjectConnection.project_id == project_id,
+            ProjectConnection.connector_slug == connector_slug,
+            ProjectConnection.status == ProjectConnectionStatus.active,
+        )
+        return db.exec(stmt).first()
+
+
 async def build_check_connection_interrupt(
     *,
     source: str,
     connection_status: str = "connected",
     account_detail: str | None = None,
 ) -> dict:
-    """Build HITL payload for verifying the user's source connection."""
+    """Build HITL payload for an already-connected source (confirm + proceed)."""
     src_label = await deps.connector_schema.source_label(source)
     payload: dict[str, Any] = {
         "type": "check_connection",
         "phase": CONNECTION_PHASE,
         "source_label": src_label,
         "connection_status": connection_status,
-        "message": f"Let's verify your {src_label} connection before we continue.",
+        "message": f"Your {src_label} account is connected. Ready to continue?",
     }
     if account_detail:
         payload["account_detail"] = account_detail
     return payload
+
+
+async def build_connect_source_interrupt(
+    *,
+    source: str,
+    project_id: str,
+) -> dict:
+    """Build HITL payload to trigger the OAuth connect screen (not yet connected)."""
+    src_label = await deps.connector_schema.source_label(source)
+    return {
+        "type": "connect_source",
+        "phase": CONNECTION_PHASE,
+        "source_label": src_label,
+        "connector_slug": source,
+        "project_id": project_id,
+        "message": f"Connect your {src_label} account to continue.",
+        "auth_url": None,  # Frontend calls /connections/{slug}/authorize to get this
+    }
 
 
 async def build_select_object_interrupt(
@@ -222,19 +256,69 @@ Return ONLY valid JSON:
 async def check_source_connection(state: GlobalAgentState) -> dict[str, Any]:
     """Connection phase node 1 — verify source CRM auth.
 
-    Mock: always "connected". Real OAuth integration is a future task.
-    Resume payload: {"action": "confirm"} | {"action": "connect"}
+    1. Looks up ProjectConnection scoped by state.project_id + connector_slug.
+    2. If active connection found → confirms with user and proceeds.
+    3. If not found → sends connect_source interrupt; on return re-checks DB.
+
+    Resume payload:
+        Connected path:   {"action": "confirm"}
+        Connect path:     {"action": "connected"} after OAuth popup closes
     """
     source_id = source_connector_id(state.source) or "salesforce"
+    project_id: UUID | None = state.project_id
 
-    hitl_interruptions_total.labels(interrupt_type="check_connection").inc()
-    _response: Any = interrupt(
-        await build_check_connection_interrupt(
-            source=source_id,
-            connection_status="connected",
-            account_detail=None,
+    if not project_id:
+        # No project context — fall back to confirmed (avoids blocking the flow
+        # in dev/test where project_id isn't wired yet).
+        logger.warning("check_source_connection_no_project_id", source=source_id)
+        src_label = await deps.connector_schema.source_label(source_id)
+        return {
+            "source_connected": True,
+            "messages": [
+                AIMessage(
+                    content=json.dumps(
+                        {
+                            "type": "agent_event",
+                            "event": "connection_source_verified",
+                            "message": f"Source Connected: {src_label}",
+                            "phase": CONNECTION_PHASE,
+                            "status": "confirmed",
+                        }
+                    )
+                )
+            ],
+        }
+
+    existing = _lookup_active_connection(project_id, source_id)
+
+    if existing:
+        # Already connected — show confirmation card, wait for user to proceed.
+        account_detail = (existing.connection_metadata or {}).get("instance_url")
+        hitl_interruptions_total.labels(interrupt_type="check_connection").inc()
+        _response: Any = interrupt(
+            await build_check_connection_interrupt(
+                source=source_id,
+                connection_status="connected",
+                account_detail=account_detail,
+            )
         )
-    )
+        # User confirmed (or we auto-proceed on any truthy response).
+    else:
+        # Not connected — ask user to go through OAuth.
+        hitl_interruptions_total.labels(interrupt_type="connect_source").inc()
+        _response = interrupt(
+            await build_connect_source_interrupt(
+                source=source_id,
+                project_id=str(project_id),
+            )
+        )
+        # After OAuth popup closes the frontend resumes with {"action": "connected"}.
+        # Re-check DB to confirm the row was actually created.
+        existing = _lookup_active_connection(project_id, source_id)
+        if not existing:
+            logger.warning("check_source_connection_still_missing", source=source_id, project_id=str(project_id))
+            # Return without setting source_connected so the router retries.
+            return {}
 
     src_label = await deps.connector_schema.source_label(source_id)
     return {
@@ -280,8 +364,11 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
 
     objects: list[str] = list(state.available_objects or [])
     if not objects:
+        if not state.project_id:
+            raise RuntimeError("project_id required to list Salesforce objects — no env fallback allowed")
         try:
-            objects = await deps.salesforce.list_eligible_objects(
+            sf = deps.salesforce_for_project(state.project_id)
+            objects = await sf.list_eligible_objects(
                 include_standard=True,
                 include_custom=True,
             )

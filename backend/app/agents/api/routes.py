@@ -131,12 +131,27 @@ async def _handle_info(langgraph_agent) -> JSONResponse:
     )
 
 
-def _inject_session_context(run_body: dict[str, Any], session: Session) -> dict[str, Any]:
-    """Merge authenticated user identity into the AG-UI state payload."""
+def _inject_session_context(
+    run_body: dict[str, Any], session: Session, request: "Request | None" = None
+) -> dict[str, Any]:
+    """Merge authenticated user identity into the AG-UI state payload.
+
+    project_id resolution order:
+    1. Already in state (client explicitly passed it)
+    2. session.project_id (set when session was created with a project)
+    3. X-Project-Id request header (sent by the frontend on every agent call)
+    """
     state = dict(run_body.get("state") or {})
     state.setdefault("customer_id", session.user_id)
     if session.username and not state.get("username"):
         state["username"] = session.username
+    if not state.get("project_id"):
+        if session.project_id:
+            state["project_id"] = str(session.project_id)
+        elif request:
+            header_pid = request.headers.get("x-project-id") or request.headers.get("X-Project-Id")
+            if header_pid:
+                state["project_id"] = header_pid
     return {**run_body, "state": state}
 
 
@@ -148,7 +163,7 @@ async def _handle_agent_run(
     path: str,
     session: Session,
 ):
-    run_body = _inject_session_context(_extract_run_payload(body, path=path), session)
+    run_body = _inject_session_context(_extract_run_payload(body, path=path), session, request)
     try:
         input_data = RunAgentInput.model_validate(run_body)
     except Exception as exc:

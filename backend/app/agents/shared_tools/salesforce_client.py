@@ -1,25 +1,22 @@
 """Salesforce REST API client + protocol.
 
-Merges the two files from ``crawler_agent/src/integrations/salesforce/`` into
-one module. ``SourceClient`` is the Protocol the agent depends on; future
-adapters (HubSpot, etc.) will satisfy the same interface.
+Auth strategy (priority order):
+1. DB tokens — load access_token + instance_url from ProjectConnectionSecret
+   for the given project_id. Refresh automatically on 401.
+2. Env-var fallback — username-password flow using SALESFORCE_* env vars.
+   Used in dev/test when no project_id is available.
 """
 
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Protocol,
-    runtime_checkable,
-)
+from typing import Any, Optional, Protocol, runtime_checkable
+from uuid import UUID
 
 import httpx
 
 from app.agents.core.agent_config import _AgentSettingsProxy
-from app.schemas.agent.types import (
-    SourceField,
-    SourceSchema,
-)
+from app.core.logging import logger
+from app.schemas.agent.types import SourceField, SourceSchema
 
 
 @runtime_checkable
@@ -41,27 +38,66 @@ class SourceClient(Protocol):
 
 
 class SalesforceClient:
-    """Salesforce REST client using the username-password OAuth flow.
+    """Salesforce REST client.
 
-    The access token + instance URL are cached in-memory after the first
-    successful auth and reused for subsequent calls in the same process.
+    Tries DB-stored OAuth tokens first (project-scoped). Falls back to the
+    username-password env-var flow when no project_id is set.
     """
 
-    def __init__(self, settings: _AgentSettingsProxy) -> None:
-        """Initialise without authenticating.
-
-        Args:
-            settings: Agent settings proxy with Salesforce credentials.
-        """
+    def __init__(self, settings: _AgentSettingsProxy, project_id: Optional[UUID] = None) -> None:
+        """Initialize client with optional project-scoped OAuth credentials."""
         self.settings = settings
+        self.project_id = project_id
         self._token: str | None = None
         self._instance_url: str | None = None
 
+    # ------------------------------------------------------------------
+    # Auth
+    # ------------------------------------------------------------------
+
     async def authenticate(self) -> None:
-        """Fetch + cache an OAuth access token. No-op if already authenticated."""
+        """Ensure _token + _instance_url are set. Prefer DB tokens."""
         if self._token and self._instance_url:
             return
+        if self.project_id:
+            await self._load_from_db()
+        else:
+            await self._authenticate_via_env()
 
+    async def _load_from_db(self) -> None:
+        """Load access_token + instance_url from ProjectConnectionSecret."""
+        from sqlmodel import Session, select
+
+        from app.models.project_connection import ProjectConnection, ProjectConnectionStatus
+        from app.models.project_connection_secret import ProjectConnectionSecret
+        from app.services.database import database_service
+
+        with Session(database_service.engine) as db:
+            conn_stmt = select(ProjectConnection).where(
+                ProjectConnection.project_id == self.project_id,
+                ProjectConnection.connector_slug == "salesforce",
+                ProjectConnection.status == ProjectConnectionStatus.active,
+            )
+            conn = db.exec(conn_stmt).first()
+            if not conn:
+                raise RuntimeError(f"No active Salesforce connection for project {self.project_id}")
+
+            secrets_stmt = select(ProjectConnectionSecret).where(
+                ProjectConnectionSecret.project_connection_id == conn.id
+            )
+            secrets = {s.secret_key: s.secret_value for s in db.exec(secrets_stmt).all()}
+
+        self._token = secrets.get("access_token")
+        self._instance_url = (conn.connection_metadata or {}).get("instance_url")
+        self._refresh_token = secrets.get("refresh_token")
+
+        if not self._token or not self._instance_url:
+            raise RuntimeError("Salesforce DB connection is missing access_token or instance_url")
+
+        logger.info("salesforce_auth_from_db", project_id=str(self.project_id))
+
+    async def _authenticate_via_env(self) -> None:
+        """Fallback: username-password OAuth flow from env vars."""
         payload = {
             "grant_type": "password",
             "client_id": self.settings.salesforce_client_id,
@@ -78,26 +114,87 @@ class SalesforceClient:
             data = response.json()
         self._token = data["access_token"]
         self._instance_url = data["instance_url"]
+        self._refresh_token = data.get("refresh_token")
+        logger.info("salesforce_auth_via_env")
 
-    async def describe_object(self, object_name: str) -> dict[str, Any]:
-        """Call ``/sobjects/{object}/describe`` for raw schema metadata."""
+    async def _refresh_access_token(self) -> None:
+        """Use stored refresh_token to get a new access_token; update DB row."""
+        refresh_token = getattr(self, "_refresh_token", None)
+        if not refresh_token:
+            raise RuntimeError("No refresh_token available; re-authentication required")
+
+        payload = {
+            "grant_type": "refresh_token",
+            "client_id": self.settings.salesforce_client_id,
+            "client_secret": self.settings.salesforce_client_secret,
+            "refresh_token": refresh_token,
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self.settings.salesforce_auth_url}/services/oauth2/token",
+                data=payload,
+            )
+            response.raise_for_status()
+            data = response.json()
+
+        new_token = data["access_token"]
+        self._token = new_token
+
+        # Persist updated token to DB if project-scoped
+        if self.project_id:
+            from sqlmodel import Session, select
+
+            from app.models.project_connection import ProjectConnection, ProjectConnectionStatus
+            from app.models.project_connection_secret import ProjectConnectionSecret
+            from app.services.database import database_service
+
+            with Session(database_service.engine) as db:
+                conn_stmt = select(ProjectConnection).where(
+                    ProjectConnection.project_id == self.project_id,
+                    ProjectConnection.connector_slug == "salesforce",
+                    ProjectConnection.status == ProjectConnectionStatus.active,
+                )
+                conn = db.exec(conn_stmt).first()
+                if conn:
+                    secret_stmt = select(ProjectConnectionSecret).where(
+                        ProjectConnectionSecret.project_connection_id == conn.id,
+                        ProjectConnectionSecret.secret_key == "access_token",  # pragma: allowlist secret
+                    )
+                    secret = db.exec(secret_stmt).first()
+                    if secret:
+                        secret.secret_value = new_token
+                        db.add(secret)
+                        db.commit()
+
+        logger.info("salesforce_token_refreshed", project_id=str(self.project_id) if self.project_id else "env")
+
+    # ------------------------------------------------------------------
+    # API calls (with lazy token refresh on 401)
+    # ------------------------------------------------------------------
+
+    async def _get(self, url: str) -> dict[str, Any]:
+        """Authenticated GET with automatic token refresh on 401."""
         await self.authenticate()
-        url = f"{self._instance_url}/services/data/v61.0/sobjects/{object_name}/describe"
         headers = {"Authorization": f"Bearer {self._token}"}
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(url, headers=headers)
+            if response.status_code == 401:
+                logger.info("salesforce_token_expired_refreshing")
+                await self._refresh_access_token()
+                headers = {"Authorization": f"Bearer {self._token}"}
+                response = await client.get(url, headers=headers)
             response.raise_for_status()
             return response.json()
 
+    async def describe_object(self, object_name: str) -> dict[str, Any]:
+        """Call ``/sobjects/{object}/describe`` for raw schema metadata."""
+        url = f"{self._instance_url}/services/data/v61.0/sobjects/{object_name}/describe"
+        return await self._get(url)
+
     async def list_sobjects(self) -> list[dict[str, Any]]:
         """List all sObjects accessible to the authenticated user."""
-        await self.authenticate()
         url = f"{self._instance_url}/services/data/v61.0/sobjects/"
-        headers = {"Authorization": f"Bearer {self._token}"}
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            return response.json().get("sobjects", [])
+        return (await self._get(url)).get("sobjects", [])
 
     async def list_eligible_objects(
         self,
@@ -125,6 +222,10 @@ class SalesforceClient:
         raw = await self.describe_object(object_name)
         fields = [self._normalize_field(f) for f in raw.get("fields", [])]
         return SourceSchema(object_name=object_name, fields=fields)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
 
     def _standard_object_set(self) -> set[str]:
         return {s.strip() for s in self.settings.salesforce_standard_objects.split(",") if s.strip()}

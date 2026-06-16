@@ -570,7 +570,7 @@ function CheckConnectionCard({ payload, onApprove, onReject }: HitlApprovalCardP
           <Button
             type="button"
             className={`flex-1 ${cfg.primaryBtn}`}
-            onClick={() => onApprove({ action: "connect" })}
+            onClick={() => onApprove({ action: isConnected ? "confirm" : "connect" })}
           >
             {isConnected ? "Continue" : `Connect ${sourceLabel}`}
           </Button>
@@ -586,6 +586,9 @@ function CheckConnectionCard({ payload, onApprove, onReject }: HitlApprovalCardP
             </Button>
           )}
         </div>
+
+
+
       </CardContent>
     </Card>
   );
@@ -1053,6 +1056,89 @@ function ActivateConfirmCard({ payload, onApprove, onReject }: HitlApprovalCardP
   );
 }
 
+
+// ── Connect source card (OAuth handoff) ──────────────────────────────────
+
+function ConnectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const sourceLabel  = payload.source_label  ?? "Source";
+  const connectorSlug = payload.connector_slug as string | undefined;
+  const projectId    = payload.project_id    as string | undefined;
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
+
+  async function handleConnect() {
+    if (!connectorSlug || !projectId) {
+      setError("Missing connector or project context.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // Route through the Next.js BFF so the httpOnly JWT is forwarded
+      const res = await fetch(
+        `/api/connections/${connectorSlug}?project_id=${projectId}`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error(`Authorize failed: ${res.status}`);
+      const { auth_url }: { auth_url: string } = await res.json();
+
+      // Open OAuth popup and wait for postMessage from callback
+      const popup = window.open(auth_url, "oauth_popup", "width=600,height=700");
+      if (!popup) {
+        setError("Popup was blocked. Please allow popups for this site.");
+        setLoading(false);
+        return;
+      }
+
+      function onMessage(event: MessageEvent) {
+        if (event.data?.type !== "oauth_complete") return;
+        window.removeEventListener("message", onMessage);
+        if (event.data.success) {
+          onApprove({ action: "connected", connector_slug: connectorSlug });
+        } else {
+          setError(event.data.error ?? "Connection failed. Please try again.");
+          setLoading(false);
+        }
+      }
+      window.addEventListener("message", onMessage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unexpected error");
+      setLoading(false);
+    }
+  }
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-3">
+        {/* Info block with red left border */}
+        <div className="flex rounded-md border border-[var(--border)]/60 overflow-hidden mb-3">
+          <div className="w-1 shrink-0 bg-red-500" />
+          <div className="px-4 py-3 space-y-0.5 flex-1 bg-red-500/[0.03]">
+            <p className="text-sm font-semibold text-[var(--foreground)]">{sourceLabel}</p>
+            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed">
+              {(payload.message as string | undefined) ?? `Connect your ${sourceLabel} account to continue.`}
+            </p>
+            {error && (
+              <p className="text-xs text-red-600 dark:text-red-400 mt-1">{error}</p>
+            )}
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          className="w-full"
+          disabled={loading}
+          onClick={handleConnect}
+        >
+          {loading ? "Opening…" : `Connect ${sourceLabel}`}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Public component — routes to correct variant ───────────────────────────
 
 export function HitlApprovalCard(props: HitlApprovalCardProps) {
@@ -1065,6 +1151,8 @@ export function HitlApprovalCard(props: HitlApprovalCardProps) {
       return <SelectChannelsCard {...cardProps} />;
     case "select_source":
       return <SelectSourceCard {...cardProps} />;
+    case "connect_source":
+      return <ConnectSourceCard {...cardProps} />;
     case "check_connection":
       return <CheckConnectionCard {...cardProps} />;
     case "select_object":

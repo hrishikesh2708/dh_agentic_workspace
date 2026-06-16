@@ -10,7 +10,8 @@ LangGraph's standard message reducer still works under Pydantic.
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Optional
+from uuid import UUID
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -76,6 +77,7 @@ class GlobalAgentState(BaseModel):
     # --- Session + bookkeeping ---
     user_id: int = -1
     username: str = ""
+    project_id: Optional[UUID] = None
     session_id: int | None = None
     canonical_session_id: int | None = None
     has_pending_review: bool = False

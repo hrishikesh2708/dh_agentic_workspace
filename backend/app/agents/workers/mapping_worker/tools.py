@@ -158,8 +158,11 @@ async def fetch_schemas(state: GlobalAgentState) -> dict[str, Any]:
             }
         )
 
-    # 3. Salesforce source schema (real API or per-object fallback)
-    source_schema = await deps.salesforce.load_source_schema(state.source_object)
+    # 3. Salesforce source schema — use project-scoped client (DB tokens) when available
+    sf_client = deps.salesforce_for_project(state.project_id)
+    if not state.project_id:
+        raise RuntimeError("project_id required for Salesforce schema fetch — no env fallback allowed")
+    source_schema = await sf_client.load_source_schema(state.source_object)
 
     return {
         "source_schema": source_schema,

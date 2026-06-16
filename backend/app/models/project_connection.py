@@ -10,7 +10,7 @@ from typing import (
     Any,
     Optional,
 )
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import JSON
 from sqlmodel import (
@@ -55,7 +55,7 @@ class ProjectConnection(SQLModel, table=True):
     __tablename__ = "project_connection"  # type: ignore[assignment]
     __table_args__ = (UniqueConstraint("project_id", "connector_slug", name="uq_project_connector"),)
 
-    id: Optional[UUID] = Field(default=None, primary_key=True)
+    id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
     project_id: UUID = Field(foreign_key="project.id", index=True)
     connector_slug: str = Field(foreign_key="connector.connector_slug")
     status: ProjectConnectionStatus = Field(default=ProjectConnectionStatus.active)

@@ -244,6 +244,10 @@ class Settings:
         self.SALESFORCE_PASSWORD = os.getenv("SALESFORCE_PASSWORD", "")
         self.SALESFORCE_SECURITY_TOKEN = os.getenv("SALESFORCE_SECURITY_TOKEN", "")
         self.SALESFORCE_AUTH_URL = os.getenv("SALESFORCE_AUTH_URL", "https://login.salesforce.com")
+        # Base URL used to build OAuth callback URIs.
+        # Must exactly match what is registered in each provider's app settings.
+        # Defaults to http://localhost:8000 for local dev.
+        self.OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "http://localhost:8000")
         self.SALESFORCE_STANDARD_OBJECTS = os.getenv(
             "SALESFORCE_STANDARD_OBJECTS",
             "Lead,Contact,Account,Opportunity,Case,Campaign,Task,Event,CampaignMember,Order,Product2,Quote",

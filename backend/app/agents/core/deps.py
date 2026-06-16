@@ -43,7 +43,20 @@ settings = agent_settings
 # --- External-service clients (foundational) ---
 openai = OpenAIService(agent_settings)
 vector_store = VectorStoreService(agent_settings)
-salesforce = SalesforceClient(agent_settings)
+salesforce = SalesforceClient(agent_settings)  # env-var fallback (dev / test)
+
+
+def salesforce_for_project(project_id) -> SalesforceClient:
+    """Return a SalesforceClient scoped to a specific project.
+
+    Loads OAuth tokens from ProjectConnectionSecret for the given project_id.
+    Falls back to env-var credentials when project_id is None.
+    """
+    from uuid import UUID
+
+    pid = UUID(str(project_id)) if project_id and not isinstance(project_id, UUID) else project_id
+    return SalesforceClient(agent_settings, project_id=pid)
+
 
 # --- Shared async DB engine (used by reviewer_worker + connector catalog) ---
 db_engine = create_async_engine(agent_settings.database_url, echo=False, future=True)
