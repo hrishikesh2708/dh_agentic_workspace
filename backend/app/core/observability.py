@@ -4,7 +4,7 @@ import os
 
 from langsmith import Client
 
-from app.core.config import settings
+from app.config import settings
 from app.core.logging import logger
 
 

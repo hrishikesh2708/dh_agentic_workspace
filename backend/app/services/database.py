@@ -15,7 +15,7 @@ from sqlmodel import (
     select,
 )
 
-from app.core.config import (
+from app.config import (
     Environment,
     settings,
 )

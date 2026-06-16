@@ -36,7 +36,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.api.v1.auth import get_current_user
-from app.core.config import settings
+from app.config import settings
 from app.core.logging import logger
 from app.models import Connector
 from app.models import OAuthPending

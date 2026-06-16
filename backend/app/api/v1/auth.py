@@ -19,7 +19,7 @@ from fastapi.security import (
     HTTPBearer,
 )
 
-from app.core.config import settings
+from app.config import settings
 from app.core.limiter import limiter
 from app.core.logging import (
     bind_context,

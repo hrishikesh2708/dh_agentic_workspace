@@ -13,7 +13,7 @@ from typing import (
     cast,
 )
 
-from app.core.config import settings
+from app.config import settings
 from app.core.logging import logger
 
 # Try to import redis — it's an optional dependency

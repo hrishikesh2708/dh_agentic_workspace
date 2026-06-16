@@ -16,7 +16,7 @@ from jwt.exceptions import PyJWTError
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from app.core.config import settings
+from app.config import settings
 from app.core.logging import (
     bind_context,
     clear_context,

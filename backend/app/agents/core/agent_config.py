@@ -7,7 +7,7 @@ a single ``agent_settings`` proxy that bridges the two so the ported code
 stays untouched.
 
 The adapter is read-only and lazy — values reflect the live state of
-``app.core.config.settings``.
+``app.config.settings``.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote_plus
 
-from app.core.config import settings as _settings
+from app.config import settings as _settings
 
 # Anchor for relative schema paths in ``app/agents/shared_tools/``
 _SHARED_TOOLS_ROOT = Path(__file__).resolve().parent.parent / "shared_tools"

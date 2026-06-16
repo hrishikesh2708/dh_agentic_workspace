@@ -22,7 +22,7 @@ from typing import (
 import structlog
 from asgi_correlation_id import correlation_id
 
-from app.core.config import (
+from app.config import (
     Environment,
     settings,
 )
