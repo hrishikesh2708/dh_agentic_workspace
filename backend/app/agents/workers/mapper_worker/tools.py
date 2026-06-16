@@ -10,8 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.agents.core.agent_config import _AgentSettingsProxy
-from app.agents.shared_tools.openai_client import OpenAIService
-from app.agents.shared_tools.vector_store import VectorStoreService
+from app.services.openai_client import OpenAIService
+from app.services.vector_store import VectorStoreService
 from app.core.logging import logger
 from app.schemas import ProposedMapping
 

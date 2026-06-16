@@ -2,7 +2,7 @@
 
 Consolidates YAML-backed schema registries and UI catalog helpers that were
 previously split across ``CatalogService``, ``DestinationRegistryService``, and
-``InternalRegistryService`` in ``app.agents.shared_tools.registries``.
+``InternalRegistryService`` in ``app.services.registries``.
 
 Planned / expected functionality
 --------------------------------

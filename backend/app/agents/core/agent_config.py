@@ -17,17 +17,17 @@ from urllib.parse import quote_plus
 
 from app.config import settings as _settings
 
-# Anchor for relative schema paths in ``app/agents/shared_tools/``
-_SHARED_TOOLS_ROOT = Path(__file__).resolve().parent.parent / "shared_tools"
+# Anchor for relative schema paths in ``app/services/``
+_SHARED_TOOLS_ROOT = Path(__file__).resolve().parent.parent.parent / "services"
 
 
 def resolve_agent_path(relative: str) -> Path:
-    """Resolve a relative path against ``app/agents/shared_tools/``.
+    """Resolve a relative path against ``app/services/``.
 
     Absolute paths are returned unchanged.
 
     Args:
-        relative: Path relative to ``app/agents/shared_tools/`` (e.g.
+        relative: Path relative to ``app/services/`` (e.g.
             ``"schemas/destinations"``) or an absolute path.
 
     Returns:

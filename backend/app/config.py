@@ -232,7 +232,7 @@ class Settings:
         self.GOLDEN_RULE_MIN_OCCURRENCES = int(os.getenv("GOLDEN_RULE_MIN_OCCURRENCES", "3"))
         self.MAPPER_TOP_K_EXAMPLES = int(os.getenv("MAPPER_TOP_K_EXAMPLES", "5"))
 
-        # Schema registry paths (relative to backend/app/agents/shared_tools/)
+        # Schema registry paths (relative to backend/app/services/)
         self.DESTINATION_SCHEMA_DIR = os.getenv("DESTINATION_SCHEMA_DIR", "schemas/destinations")
         self.INTERNAL_SCHEMA_DIR = os.getenv("INTERNAL_SCHEMA_DIR", "schemas/internal")
         self.INTERNAL_SCHEMA_NAME = os.getenv("INTERNAL_SCHEMA_NAME", "canonical")
