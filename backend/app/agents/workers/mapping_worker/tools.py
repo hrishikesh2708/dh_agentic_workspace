@@ -13,8 +13,8 @@ from app.agents import deps
 from app.agents.intent_validation import source_connector_id
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.metrics import hitl_interruptions_total
-from app.models import CanonicalField
-from app.models import DestinationFieldMapping
+from app.models import DatahashSchema
+from app.models import Destination, DestinationSchemaMapping
 from app.schemas import (
     DestinationField,
     DestinationSchema,
@@ -29,13 +29,9 @@ MAPPING_PHASE = "mapping"
 # ---------------------------------------------------------------------------
 
 
-def _matches_destination(row: DestinationFieldMapping, destinations: list[str]) -> bool:
-    """Check if a DestinationFieldMapping row belongs to any of our destinations.
-
-    Handles both "meta_capi" style IDs and split "meta" / "capi" slugs.
-    """
-    full = f"{row.destination_slug}_{row.sub_destination_slug}".strip("_")
-    return row.destination_slug in destinations or row.sub_destination_slug in destinations or full in destinations
+def _matches_destination(dest_name: str, destinations: list[str]) -> bool:
+    """Check if a destination name is in the requested destinations list."""
+    return dest_name.lower() in {d.lower() for d in destinations}
 
 
 def _confidence_to_status(confidence: float, destination_field: str | None) -> str:
@@ -92,31 +88,52 @@ async def fetch_schemas(state: GlobalAgentState) -> dict[str, Any]:
     destinations = list(state.destinations or [])
 
     async with deps.session_maker() as db:
-        # 1. Required destination field → canonical key mappings
-        result = await db.execute(
-            select(DestinationFieldMapping).where(col(DestinationFieldMapping.is_required).is_(True))
+        # 1. Resolve destination names → Destination rows
+        dest_result = await db.execute(
+            select(Destination).where(
+                col(Destination.name).in_(destinations),
+                col(Destination.is_deleted).is_(False),
+            )
         )
-        all_dfm = result.scalars().all()
-        relevant = [r for r in all_dfm if _matches_destination(r, destinations)]
-        required_canonical_keys = list({r.canonical_key for r in relevant})
+        dest_rows = {d.name: d for d in dest_result.scalars().all()}
+        dest_ids = [d.id for d in dest_rows.values()]
 
-        # 2. Canonical field details
+        # 2. Required DestinationSchemaMapping rows for matched destinations
+        dsm_result = await db.execute(
+            select(DestinationSchemaMapping).where(
+                col(DestinationSchemaMapping.destination_id).in_(dest_ids),
+                col(DestinationSchemaMapping.is_required).is_(True),
+                col(DestinationSchemaMapping.is_deleted).is_(False),
+            )
+        )
+        relevant = dsm_result.scalars().all()
+        required_schema_ids = list({r.datahash_schema_id for r in relevant})
+
+        # 3. Canonical field details
         cf_result = await db.execute(
-            select(CanonicalField).where(col(CanonicalField.canonical_key).in_(required_canonical_keys))
+            select(DatahashSchema).where(
+                col(DatahashSchema.id).in_(required_schema_ids),
+                col(DatahashSchema.is_deleted).is_(False),
+            )
         )
         canonical_fields = cf_result.scalars().all()
 
     # Build canonical_key → which destination labels require it
     # Used to display "Required · Meta CAPI, Google DM" in the mapping card
+    # Map datahash_schema_id → canonical_key for lookup
+    id_to_cf = {cf.id: cf for cf in canonical_fields}
+    # Map destination_id → destination name
+    id_to_dest_name = {d.id: d.name for d in dest_rows.values()}
+
     key_to_dest_slugs: dict[str, list[str]] = {}
     for row in relevant:
-        key = row.canonical_key
-        # Resolve which state destination this row belongs to
-        full = f"{row.destination_slug}_{row.sub_destination_slug}".strip("_")
-        matched = next(
-            (d for d in destinations if d == full or d == row.destination_slug or d == row.sub_destination_slug),
-            full,
-        )
+        cf = id_to_cf.get(row.datahash_schema_id)
+        if not cf:
+            continue
+        key = cf.canonical_key
+        matched = id_to_dest_name.get(row.destination_id, "")
+        if not _matches_destination(matched, destinations):
+            continue
         if key not in key_to_dest_slugs:
             key_to_dest_slugs[key] = []
         if matched not in key_to_dest_slugs[key]:
@@ -144,14 +161,14 @@ async def fetch_schemas(state: GlobalAgentState) -> dict[str, Any]:
             else:
                 required_by_text = f"Required · {', '.join(required_by_labels)}"
         else:
-            required_by_text = cf.field_hint or ""
+            required_by_text = cf.hint or ""
 
         canonical_field_details.append(
             {
                 "canonical_key": cf.canonical_key,
-                "field_label": cf.field_label,
-                "field_hint": cf.field_hint or "",
-                "field_category": str(cf.field_category),
+                "field_label": cf.label,
+                "field_hint": cf.hint or "",
+                "field_category": cf.category.value,
                 "is_pii": cf.is_pii,
                 "required_by_labels": required_by_labels,
                 "required_by_text": required_by_text,  # pre-built for card description
@@ -163,6 +180,8 @@ async def fetch_schemas(state: GlobalAgentState) -> dict[str, Any]:
     if not state.project_id:
         raise RuntimeError("project_id required for Salesforce schema fetch — no env fallback allowed")
     source_schema = await sf_client.load_source_schema(state.source_object)
+
+    required_canonical_keys = [cf.canonical_key for cf in canonical_fields]
 
     return {
         "source_schema": source_schema,

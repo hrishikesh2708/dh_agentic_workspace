@@ -32,16 +32,17 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.api.v1.auth import get_current_user
 from app.config import settings
 from app.core.logging import logger
-from app.models import Connector
+from app.models import Destination
 from app.models import OAuthPending
 from app.models import Project
-from app.models import ProjectConnection, ProjectConnectionStatus
+from app.models import ProjectConnection, ProjectConnectionStatus, ProjectConnectionType
 from app.models import ProjectConnectionSecret
+from app.models import Source
 from app.models import User
 from app.services.database import database_service
 
@@ -50,6 +51,23 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 # Per-connector OAuth configuration
 # ---------------------------------------------------------------------------
+
+
+# Maps parent platform slug → canonical OAuth config key.
+# Sub-connectors (e.g. "meta_conversions_api_crm") inherit the parent platform's
+# OAuth app, so we resolve them to the parent's config key at auth time.
+_PARENT_TO_OAUTH_KEY: dict[str, str] = {
+    "meta": "meta_capi",
+    "google": "google_ads",
+}
+
+
+def _canonical_oauth_slug(connector_slug: str) -> str:
+    """Map a destination/source name to its OAuth config key.
+
+    Most names map to themselves; exceptions are listed in _PARENT_TO_OAUTH_KEY.
+    """
+    return _PARENT_TO_OAUTH_KEY.get(connector_slug, connector_slug)
 
 
 def _get_connector_oauth_config(connector_slug: str) -> dict[str, str]:
@@ -128,34 +146,59 @@ def _assert_project_owned(db: Session, project_id: UUID, user_id: int) -> Projec
     return project
 
 
+def _resolve_connection_ids(connector_slug: str, db: Session) -> tuple[ProjectConnectionType, int | None, int | None]:
+    """Resolve a name to (connection_type, source_id, destination_id).
+
+    Tries Source first, then Destination. Both tables use ``name`` as the
+    human-readable slug (e.g. "salesforce", "meta", "google").
+    """
+    src = db.exec(select(Source).where(Source.name == connector_slug)).first()
+    if src:
+        return ProjectConnectionType.source, src.id, None
+
+    dest = db.exec(select(Destination).where(Destination.name == connector_slug)).first()
+    if dest:
+        return ProjectConnectionType.destination, None, dest.id
+
+    raise HTTPException(status_code=404, detail=f"No source or destination found with name '{connector_slug}'")
+
+
 def _upsert_connection(
     db: Session,
     *,
     project_id: UUID,
     connector_slug: str,
     metadata: dict[str, Any],
-    connected_by: str,
 ) -> ProjectConnection:
     """Insert or update a ProjectConnection row, return it."""
-    stmt = select(ProjectConnection).where(
-        ProjectConnection.project_id == project_id,
-        ProjectConnection.connector_slug == connector_slug,
-    )
+    conn_type, source_id, destination_id = _resolve_connection_ids(connector_slug, db)
+
+    if source_id is not None:
+        stmt = select(ProjectConnection).where(
+            ProjectConnection.project_id == project_id,
+            ProjectConnection.source_id == source_id,
+        )
+    else:
+        stmt = select(ProjectConnection).where(
+            ProjectConnection.project_id == project_id,
+            ProjectConnection.destination_id == destination_id,
+        )
     conn = db.exec(stmt).first()
     if conn:
         conn.status = ProjectConnectionStatus.active
         conn.connection_metadata = metadata
-        conn.connected_by = connected_by
+        conn.is_deleted = False
     else:
         conn = ProjectConnection(
             project_id=project_id,
-            connector_slug=connector_slug,
+            connection_type=conn_type,
+            source_id=source_id,
+            destination_id=destination_id,
             status=ProjectConnectionStatus.active,
             connection_metadata=metadata,
-            connected_by=connected_by,
         )
         db.add(conn)
-    db.flush()  # get conn.id without committing
+    db.flush()
     return conn
 
 
@@ -201,8 +244,6 @@ async def authorize(
     Inserts an OAuthPending row with the PKCE verifier, then returns
     the provider authorization URL for the frontend to open.
     """
-    cfg = _get_connector_oauth_config(connector_slug)
-
     verifier, challenge = _pkce_pair()
     state_token = secrets.token_urlsafe(32)
     redirect_uri = _callback_url(request, connector_slug)
@@ -211,16 +252,18 @@ async def authorize(
         with Session(conn_raw) as db:
             _assert_project_owned(db, project_id, user.id)
 
-            # Verify connector exists
-            connector = db.get(Connector, connector_slug)
-            if not connector:
-                raise HTTPException(status_code=404, detail=f"Connector '{connector_slug}' not found")
+            oauth_slug = _canonical_oauth_slug(connector_slug)
 
+            cfg = _get_connector_oauth_config(oauth_slug)
+
+            conn_type, source_id, destination_id = _resolve_connection_ids(connector_slug, db)
             pending = OAuthPending(
                 state=state_token,
-                connector_slug=connector_slug,
                 project_id=project_id,
                 session_id=request.headers.get("x-session-id", ""),
+                connection_type=conn_type,
+                source_id=source_id,
+                destination_id=destination_id,
                 pkce_verifier=verifier,
             )
             db.add(pending)
@@ -236,7 +279,7 @@ async def authorize(
         "code_challenge_method": "S256",
     }
 
-    # Connector-specific scope overrides
+    # Connector-specific scope overrides — keyed by oauth_slug (canonical platform key)
     scopes: dict[str, str] = {
         "salesforce": "api refresh_token offline_access",
         "meta_capi": "ads_management,business_management",
@@ -244,12 +287,12 @@ async def authorize(
         "tiktok": "user.info.basic,pixel.management",
         "snapchat": "snapchat-marketing-api",
     }
-    if connector_slug in scopes:
-        params["scope"] = scopes[connector_slug]
+    if oauth_slug in scopes:
+        params["scope"] = scopes[oauth_slug]
 
     # Google requires these to receive a refresh_token; without them the token
     # response omits refresh_token entirely and the connection breaks after 1h.
-    if connector_slug == "google_ads":
+    if oauth_slug == "google_ads":
         params["access_type"] = "offline"
         params["prompt"] = "consent"
 
@@ -284,18 +327,24 @@ async def callback(
         logger.warning("oauth_callback_error", connector_slug=connector_slug, error=error)
         return _popup_close_response(success=False, error=error)
 
-    cfg = _get_connector_oauth_config(connector_slug)
     redirect_uri = _callback_url(request, connector_slug)
 
     with _get_engine().begin() as conn_raw:
         with Session(conn_raw) as db:
-            # Look up pending row
+            # Look up pending row and verify it belongs to this connector
             pending = db.get(OAuthPending, state)
-            if not pending or pending.connector_slug != connector_slug:
+            if not pending:
                 raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+            # Re-resolve the incoming connector_slug to ids and confirm they match the pending row
+            _, expected_source_id, expected_dest_id = _resolve_connection_ids(connector_slug, db)
+            if pending.source_id != expected_source_id or pending.destination_id != expected_dest_id:
+                raise HTTPException(status_code=400, detail="OAuth state does not match connector")
 
             project_id = pending.project_id
             verifier = pending.pkce_verifier
+
+            oauth_slug = _canonical_oauth_slug(connector_slug)
+            cfg = _get_connector_oauth_config(oauth_slug)
 
             # Exchange code for tokens
             try:
@@ -311,8 +360,8 @@ async def callback(
                 db.commit()
                 return _popup_close_response(success=False, error="Token exchange failed")
 
-            # Extract secrets vs metadata per connector
-            secrets_map, metadata = _parse_token_response(connector_slug, token_data)
+            # Extract secrets vs metadata per connector (use oauth_slug for platform branching)
+            secrets_map, metadata = _parse_token_response(oauth_slug, token_data)
 
             # Persist connection
             conn_obj = _upsert_connection(
@@ -320,7 +369,6 @@ async def callback(
                 project_id=project_id,
                 connector_slug=connector_slug,
                 metadata=metadata,
-                connected_by=str(project_id),
             )
             if conn_obj.id is None:
                 raise RuntimeError("ProjectConnection id missing after upsert")
@@ -350,10 +398,16 @@ async def connection_status(
     with _get_engine().begin() as conn_raw:
         with Session(conn_raw) as db:
             _assert_project_owned(db, project_id, user.id)
+            _, source_id, destination_id = _resolve_connection_ids(connector_slug, db)
+            if source_id is not None:
+                filter_col = ProjectConnection.source_id == source_id
+            else:
+                filter_col = ProjectConnection.destination_id == destination_id
             stmt = select(ProjectConnection).where(
                 ProjectConnection.project_id == project_id,
-                ProjectConnection.connector_slug == connector_slug,
                 ProjectConnection.status == ProjectConnectionStatus.active,
+                col(ProjectConnection.is_deleted).is_(False),
+                filter_col,
             )
             conn_obj = db.exec(stmt).first()
 
@@ -363,6 +417,42 @@ async def connection_status(
         "connector_slug": connector_slug,
         "account_detail": metadata.get("instance_url") or metadata.get("account_name"),
     }
+
+
+# ---------------------------------------------------------------------------
+# DEBUG: fake connection (dev only)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{connector_slug}/debug-connect")
+async def debug_connect(
+    connector_slug: str,
+    project_id: UUID = Query(...),
+    user: User = Depends(get_current_user),
+):
+    """[DEBUG] Insert a fake active ProjectConnection without going through OAuth.
+
+    Useful for local development to test downstream agent steps (mapping, etc.)
+    without needing real OAuth credentials.
+    """
+    with _get_engine().begin() as conn_raw:
+        with Session(conn_raw) as db:
+            _assert_project_owned(db, project_id, user.id)
+
+            _upsert_connection(
+                db,
+                project_id=project_id,
+                connector_slug=connector_slug,
+                metadata={"debug": True, "instance_url": f"https://debug.{connector_slug}.local"},
+            )
+            db.commit()
+
+    logger.warning(
+        "debug_fake_connection_created",
+        connector_slug=connector_slug,
+        project_id=str(project_id),
+    )
+    return {"connected": True, "connector_slug": connector_slug, "debug": True}
 
 
 # ---------------------------------------------------------------------------
@@ -384,9 +474,14 @@ async def disconnect(
     with _get_engine().begin() as conn_raw:
         with Session(conn_raw) as db:
             _assert_project_owned(db, project_id, user.id)
+            _, source_id, destination_id = _resolve_connection_ids(connector_slug, db)
+            if source_id is not None:
+                filter_col = ProjectConnection.source_id == source_id
+            else:
+                filter_col = ProjectConnection.destination_id == destination_id
             stmt = select(ProjectConnection).where(
                 ProjectConnection.project_id == project_id,
-                ProjectConnection.connector_slug == connector_slug,
+                filter_col,
             )
             rows = db.exec(stmt).all()
             for row in rows:

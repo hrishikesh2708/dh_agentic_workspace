@@ -95,10 +95,6 @@ class _AgentSettingsProxy:
         return _settings.REVIEW_THRESHOLD
 
     @property
-    def golden_rule_min_occurrences(self) -> int:
-        return _settings.GOLDEN_RULE_MIN_OCCURRENCES
-
-    @property
     def mapper_top_k_examples(self) -> int:
         return _settings.MAPPER_TOP_K_EXAMPLES
 

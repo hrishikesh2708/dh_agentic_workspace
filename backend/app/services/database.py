@@ -4,6 +4,7 @@ from typing import (
     List,
     Optional,
 )
+from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
@@ -137,27 +138,26 @@ class DatabaseService:
         session_id: str,
         user_id: int,
         name: str = "",
-        username: str | None = None,
-        project_id=None,
+        project_id: UUID | None = None,
     ) -> ChatSession:
         """Create a new chat session.
 
         Args:
-            session_id: The ID for the new session
+            session_id: The ID for the new session (= LangGraph thread_id)
             user_id: The ID of the user who owns the session
             name: Optional name for the session (defaults to empty string)
-            username: Display name copied from the user for LLM personalization
             project_id: UUID of the project this session is scoped to
 
         Returns:
             ChatSession: The created session
         """
+        if project_id is None:
+            raise ValueError("project_id is required")
         with Session(self.engine) as session:
             chat_session = ChatSession(
                 id=session_id,
                 user_id=user_id,
                 name=name,
-                username=username,
                 project_id=project_id,
             )
             session.add(chat_session)

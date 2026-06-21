@@ -143,8 +143,6 @@ def _inject_session_context(
     """
     state = dict(run_body.get("state") or {})
     state.setdefault("customer_id", session.user_id)
-    if session.username and not state.get("username"):
-        state["username"] = session.username
     if not state.get("project_id"):
         if session.project_id:
             state["project_id"] = str(session.project_id)

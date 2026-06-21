@@ -8,7 +8,7 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage
 from langgraph.types import interrupt
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.agents import deps
 from app.agents.intent_validation import (
@@ -23,7 +23,9 @@ from app.agents.messages import intent_gather_event
 from app.agents.orchestrator.state import GlobalAgentState
 from app.core.logging import logger
 from app.core.metrics import hitl_interruptions_total
+from app.models import Destination
 from app.models import ProjectConnection, ProjectConnectionStatus
+from app.models import Source
 from app.services.database import database_service
 
 CONNECTION_PHASE = "connection"
@@ -63,14 +65,36 @@ async def _coerce_source(source_id: str):
     )
 
 
+def _resolve_source_or_dest_id(name: str) -> tuple[int | None, int | None]:
+    """Resolve a source/destination name to (source_id, destination_id).
+
+    Tries Source first, then Destination. Returns (None, None) if not found.
+    """
+    with Session(database_service.engine) as db:
+        src = db.exec(select(Source).where(Source.name == name)).first()
+        if src:
+            return src.id, None
+        dest = db.exec(select(Destination).where(Destination.name == name)).first()
+        if dest:
+            return None, dest.id
+        return None, None
+
+
 def _lookup_active_connection(project_id: UUID, connector_slug: str) -> ProjectConnection | None:
-    """Return an active ProjectConnection row, or None if not found."""
+    """Return an active ProjectConnection row for a project + connector slug, or None."""
+    source_id, destination_id = _resolve_source_or_dest_id(connector_slug)
+    if source_id is None and destination_id is None:
+        return None
     with Session(database_service.engine) as db:
         stmt = select(ProjectConnection).where(
             ProjectConnection.project_id == project_id,
-            ProjectConnection.connector_slug == connector_slug,
             ProjectConnection.status == ProjectConnectionStatus.active,
+            col(ProjectConnection.is_deleted).is_(False),
         )
+        if source_id is not None:
+            stmt = stmt.where(ProjectConnection.source_id == source_id)
+        else:
+            stmt = stmt.where(ProjectConnection.destination_id == destination_id)
         return db.exec(stmt).first()
 
 
@@ -168,13 +192,22 @@ async def build_check_channels_interrupt(
     *,
     destinations: list[str],
     channel_statuses: dict[str, str],
+    project_id: str | None = None,
 ) -> dict:
-    """Build HITL payload for verifying ad platform channel connections."""
+    """Build HITL payload for verifying ad platform channel connections.
+
+    Each channel entry includes ``project_id`` and ``connector_slug`` so the
+    frontend can call the authorize endpoint directly for missing destinations.
+    """
     channels = []
     for dest_id in destinations:
         label = await deps.connector_schema.destination_label(dest_id)
         status = channel_statuses.get(dest_id, "not_connected")
-        channels.append({"id": dest_id, "label": label, "status": status})
+        entry: dict[str, Any] = {"id": dest_id, "label": label, "status": status}
+        if project_id:
+            entry["project_id"] = project_id
+            entry["connector_slug"] = dest_id
+        channels.append(entry)
     return {
         "type": "check_channels",
         "phase": CONNECTION_PHASE,
@@ -430,40 +463,93 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
 
 
 async def check_channel_connections(state: GlobalAgentState) -> dict[str, Any]:
-    """Connection phase node 3 — verify destination channel connections.
+    """Connection phase node 3 — batch destination connection check.
 
-    Mock: all "connected". Real integration is a future task.
+    Shows all chosen destinations as one list with live DB-backed status.
+    Loops until every destination is either connected or skipped:
+
+    1. Look up each destination in ProjectConnection (scoped by project_id).
+    2. Interrupt with the live status list.
+    3. Frontend either:
+       - Completes OAuth for a missing destination → resume with
+         ``{"action": "connected", "platform_id": "<dest_id>"}``
+       - Skips a destination → ``{"action": "skip", "platform_id": "<dest_id>"}``
+       - Confirms all → ``{"action": "confirm_all"}``
+    4. Loop back to step 1 until all settled, then proceed to mapping.
     """
     destinations = list(state.destinations or [])
-    mock_statuses: dict[str, str] = {d: "connected" for d in destinations}
+    project_id: UUID | None = state.project_id
+    skipped: set[str] = set()
 
-    hitl_interruptions_total.labels(interrupt_type="check_channels").inc()
-    _response: Any = interrupt(
-        await build_check_channels_interrupt(
-            destinations=destinations,
-            channel_statuses=mock_statuses,
-        )
-    )
+    while True:
+        # ── Real DB lookup ────────────────────────────────────────────────
+        statuses: dict[str, str] = {}
+        for dest_id in destinations:
+            if dest_id in skipped:
+                statuses[dest_id] = "skipped"
+            elif project_id and _lookup_active_connection(project_id, dest_id):
+                statuses[dest_id] = "connected"
+            else:
+                statuses[dest_id] = "not_connected"
 
-    messages: list[Any] = []
-    for dest_id in destinations:
-        dest_label = await deps.connector_schema.destination_label(dest_id)
-        messages.append(
-            AIMessage(
-                content=json.dumps(
-                    {
-                        "type": "agent_event",
-                        "event": "connection_channel_verified",
-                        "message": f"Channel Connected: {dest_label}",
-                        "phase": CONNECTION_PHASE,
-                        "status": "confirmed",
-                    }
-                )
+        all_settled = all(v in ("connected", "skipped") for v in statuses.values())
+
+        hitl_interruptions_total.labels(interrupt_type="check_channels").inc()
+        response: Any = interrupt(
+            await build_check_channels_interrupt(
+                destinations=destinations,
+                channel_statuses=statuses,
+                project_id=str(project_id) if project_id else None,
             )
         )
 
+        if not isinstance(response, dict):
+            break
+
+        action = response.get("action", "confirm_all")
+        platform_id = str(response.get("platform_id", ""))
+
+        if action == "confirm_all" or all_settled:
+            break
+        elif action == "connected":
+            # Frontend completed OAuth popup — loop back and re-check DB.
+            continue
+        elif action == "skip" and platform_id:
+            skipped.add(platform_id)
+            continue
+        else:
+            break
+
+    # ── Final DB read for confirmed statuses ─────────────────────────────
+    final_statuses: dict[str, str] = {}
+    for dest_id in destinations:
+        if dest_id in skipped:
+            final_statuses[dest_id] = "skipped"
+        elif project_id and _lookup_active_connection(project_id, dest_id):
+            final_statuses[dest_id] = "connected"
+        else:
+            final_statuses[dest_id] = "not_connected"
+
+    messages: list[Any] = []
+    for dest_id, status in final_statuses.items():
+        if status == "connected":
+            dest_label = await deps.connector_schema.destination_label(dest_id)
+            messages.append(
+                AIMessage(
+                    content=json.dumps(
+                        {
+                            "type": "agent_event",
+                            "event": "connection_channel_verified",
+                            "message": f"Channel Connected: {dest_label}",
+                            "phase": CONNECTION_PHASE,
+                            "status": "confirmed",
+                        }
+                    )
+                )
+            )
+
     return {
-        "channel_statuses": mock_statuses,
+        "channel_statuses": final_statuses,
         "connection_phase_complete": True,
         "messages": messages,
     }

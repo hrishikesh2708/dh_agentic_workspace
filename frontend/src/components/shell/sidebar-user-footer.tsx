@@ -10,8 +10,19 @@ import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import { readProjectIdFromCookie } from "@/lib/project-storage";
 
-const CONNECTOR_SLUGS = ["salesforce", "meta_capi", "google_ads", "tiktok", "snapchat"] as const;
+// Use actual DB connector slugs (sub-connector slugs where applicable).
+// "meta_conversions_api_crm" is the active sub-connector the agent resolves to;
+// "meta_capi" is only the OAuth config key — not what gets stored in ProjectConnection.
+const CONNECTOR_SLUGS = ["salesforce", "meta_conversions_api_crm", "google_offline_conversions", "tiktok", "snapchat"] as const;
 type ConnectorSlug = typeof CONNECTOR_SLUGS[number];
+
+async function debugTestConnect(connectorSlug: ConnectorSlug): Promise<string> {
+  const projectId = readProjectIdFromCookie();
+  if (!projectId) return "No active project (set one first)";
+  const res = await fetch(`/api/connections/${connectorSlug}?project_id=${projectId}`, { method: "PATCH" });
+  if (res.ok) return `✓ fake ${connectorSlug} connection created`;
+  return `Error ${res.status}: ${await res.text()}`;
+}
 
 async function debugDeleteConnection(connectorSlug: ConnectorSlug): Promise<string> {
   const projectId = readProjectIdFromCookie();
@@ -127,23 +138,36 @@ export function SidebarUserFooter({ collapsed }: { collapsed: boolean }) {
         {devOpen && (
           <div className="mt-1 flex flex-col gap-0.5">
             {/* Header row */}
-            <div className="grid grid-cols-[1fr_auto_auto] items-center gap-1 px-1 mb-1">
+            <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-1 px-1 mb-1">
               <span className="text-[9px] font-mono text-[var(--muted-foreground)] uppercase tracking-wide">connector</span>
               <span className="text-[9px] font-mono text-[var(--muted-foreground)] uppercase tracking-wide">auth</span>
+              <span className="text-[9px] font-mono text-[var(--muted-foreground)] uppercase tracking-wide">test</span>
               <span className="text-[9px] font-mono text-[var(--muted-foreground)] uppercase tracking-wide">del</span>
             </div>
 
             {CONNECTOR_SLUGS.map(slug => (
-              <div key={slug} className="grid grid-cols-[1fr_auto_auto] items-center gap-1 px-1 py-0.5 rounded hover:bg-[var(--muted)]/30">
+              <div key={slug} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-1 px-1 py-0.5 rounded hover:bg-[var(--muted)]/30">
                 <span className="text-[10px] font-mono text-[var(--foreground)] truncate">{slug}</span>
 
-                {/* Authenticate */}
+                {/* Authenticate (real OAuth) */}
                 <button
                   className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900 transition-colors"
-                  title={`Authenticate ${slug}`}
+                  title={`OAuth authenticate ${slug}`}
                   onClick={() => debugAuthenticate(slug, setDevMsg)}
                 >
                   ↗
+                </button>
+
+                {/* Test: fake connect (no OAuth) */}
+                <button
+                  className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-green-50 text-green-600 hover:bg-green-100 dark:bg-green-950 dark:text-green-400 dark:hover:bg-green-900 transition-colors"
+                  title={`Fake-connect ${slug} (no OAuth)`}
+                  onClick={async () => {
+                    setDevMsg("…");
+                    setDevMsg(await debugTestConnect(slug));
+                  }}
+                >
+                  ✓
                 </button>
 
                 {/* Delete */}

@@ -71,17 +71,23 @@ class SalesforceClient:
 
     async def _load_from_db(self) -> None:
         """Load access_token + instance_url from ProjectConnectionSecret."""
-        from sqlmodel import Session, select
+        from sqlmodel import Session, col, select
 
         from app.models import ProjectConnection, ProjectConnectionStatus
         from app.models import ProjectConnectionSecret
         from app.services.database import database_service
 
         with Session(database_service.engine) as db:
+            from app.models import Source
+
+            src = db.exec(select(Source).where(Source.name == "salesforce")).first()
+            if not src:
+                raise RuntimeError("Salesforce source not configured in the source table")
             conn_stmt = select(ProjectConnection).where(
                 ProjectConnection.project_id == self.project_id,
-                ProjectConnection.connector_slug == "salesforce",
+                ProjectConnection.source_id == src.id,
                 ProjectConnection.status == ProjectConnectionStatus.active,
+                col(ProjectConnection.is_deleted).is_(False),
             )
             conn = db.exec(conn_stmt).first()
             if not conn:
@@ -126,19 +132,25 @@ class SalesforceClient:
 
         # Persist updated token to DB if project-scoped
         if self.project_id:
-            from sqlmodel import Session, select
+            from sqlmodel import Session, col, select
 
             from app.models import ProjectConnection, ProjectConnectionStatus
             from app.models import ProjectConnectionSecret
             from app.services.database import database_service
 
             with Session(database_service.engine) as db:
-                conn_stmt = select(ProjectConnection).where(
-                    ProjectConnection.project_id == self.project_id,
-                    ProjectConnection.connector_slug == "salesforce",
-                    ProjectConnection.status == ProjectConnectionStatus.active,
-                )
-                conn = db.exec(conn_stmt).first()
+                from app.models import Source
+
+                src = db.exec(select(Source).where(Source.name == "salesforce")).first()
+                conn = None
+                if src:
+                    conn_stmt = select(ProjectConnection).where(
+                        ProjectConnection.project_id == self.project_id,
+                        ProjectConnection.source_id == src.id,
+                        ProjectConnection.status == ProjectConnectionStatus.active,
+                        col(ProjectConnection.is_deleted).is_(False),
+                    )
+                    conn = db.exec(conn_stmt).first()
                 if conn:
                     secret_stmt = select(ProjectConnectionSecret).where(
                         ProjectConnectionSecret.project_connection_id == conn.id,

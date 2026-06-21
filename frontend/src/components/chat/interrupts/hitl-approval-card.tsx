@@ -903,8 +903,57 @@ const CHANNEL_AVATAR_COLORS: Record<string, string> = {
 
 function CheckChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
   const channels = (payload.channels ?? []) as ChannelConnectionStatus[];
-  // First channel that still needs connecting
-  const pendingChannel = channels.find((ch) => ch.status !== "connected");
+  const pendingChannel = channels.find((ch) => ch.status !== "connected" && ch.status !== "skipped");
+  const allSettled = !pendingChannel;
+
+  // Per-channel loading + error state keyed by channel id
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  async function handleConnect(ch: ChannelConnectionStatus) {
+    const connectorSlug = (ch as Record<string, unknown>).connector_slug as string | undefined ?? ch.id;
+    const projectId = (ch as Record<string, unknown>).project_id as string | undefined;
+
+    if (!connectorSlug || !projectId) {
+      setErrors((e) => ({ ...e, [ch.id]: "Missing connector or project context." }));
+      return;
+    }
+
+    setConnecting(ch.id);
+    setErrors((e) => ({ ...e, [ch.id]: "" }));
+
+    try {
+      const res = await fetch(
+        `/api/connections/${connectorSlug}?project_id=${projectId}`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error(`Authorize failed: ${res.status}`);
+      const { auth_url }: { auth_url: string } = await res.json();
+
+      const popup = window.open(auth_url, "oauth_popup", "width=600,height=700");
+      if (!popup) {
+        setErrors((e) => ({ ...e, [ch.id]: "Popup blocked — please allow popups and retry." }));
+        setConnecting(null);
+        return;
+      }
+
+      function onMessage(event: MessageEvent) {
+        if (event.data?.type !== "oauth_complete") return;
+        window.removeEventListener("message", onMessage);
+        if (event.data.success) {
+          // Resume the graph — backend re-checks DB and re-interrupts with updated list
+          onApprove({ action: "connected", platform_id: ch.id });
+        } else {
+          setErrors((ev) => ({ ...ev, [ch.id]: event.data.error ?? "Connection failed — please retry." }));
+          setConnecting(null);
+        }
+      }
+      window.addEventListener("message", onMessage);
+    } catch (err) {
+      setErrors((e) => ({ ...e, [ch.id]: err instanceof Error ? err.message : "Unexpected error" }));
+      setConnecting(null);
+    }
+  }
 
   return (
     <Card className="border-[var(--border)] bg-[var(--card)]">
@@ -918,6 +967,8 @@ function CheckChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
         <div className="space-y-2">
           {channels.map((ch) => {
             const isConnected = ch.status === "connected";
+            const isSkipped = ch.status === "skipped";
+            const isLoading = connecting === ch.id;
             const avatarColor = CHANNEL_AVATAR_COLORS[ch.id] ?? "#6B7280";
             const initial = ch.label.charAt(0).toUpperCase();
 
@@ -937,24 +988,32 @@ function CheckChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-[var(--foreground)]">{ch.label}</p>
-                  {ch.detail ? (
+                  {ch.detail && (
                     <p className="text-xs text-[var(--muted-foreground)] truncate">{ch.detail}</p>
-                  ) : null}
+                  )}
+                  {errors[ch.id] && (
+                    <p className="text-xs text-red-500 mt-0.5">{errors[ch.id]}</p>
+                  )}
                 </div>
 
-                {/* Status badge or inline Connect */}
+                {/* Status badge or Connect button */}
                 {isConnected ? (
                   <span className="shrink-0 rounded-full border border-green-500 px-3 py-1 text-xs font-medium text-green-600 dark:text-green-400">
                     Connected
+                  </span>
+                ) : isSkipped ? (
+                  <span className="shrink-0 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-medium text-[var(--muted-foreground)]">
+                    Skipped
                   </span>
                 ) : (
                   <Button
                     type="button"
                     size="sm"
                     className="shrink-0"
-                    onClick={() => onApprove({ action: "connect", platform_id: ch.id })}
+                    disabled={isLoading || connecting !== null}
+                    onClick={() => handleConnect(ch)}
                   >
-                    Connect
+                    {isLoading ? "Opening…" : "Connect"}
                   </Button>
                 )}
               </div>
@@ -963,31 +1022,45 @@ function CheckChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
         </div>
 
         {/* Primary CTA */}
-        {pendingChannel ? (
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              className="flex-1"
-              onClick={() => onApprove({ action: "connect", platform_id: pendingChannel.id })}
-            >
-              Connect {pendingChannel.label}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1"
-              onClick={() => onApprove({ action: "skip", platform_id: pendingChannel.id })}
-            >
-              Skip for now
-            </Button>
-          </div>
-        ) : (
+        {allSettled ? (
           <Button
             type="button"
             className="w-full bg-green-600 hover:bg-green-700 text-white"
             onClick={() => onApprove({ action: "confirm_all" })}
           >
-            All connected — continue
+            All settled — continue
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              className="flex-1"
+              disabled={connecting !== null}
+              onClick={() => pendingChannel && handleConnect(pendingChannel)}
+            >
+              {connecting ? "Opening…" : `Connect ${pendingChannel?.label ?? ""}`}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              disabled={connecting !== null}
+              onClick={() => pendingChannel && onApprove({ action: "skip", platform_id: pendingChannel.id })}
+            >
+              Skip for now
+            </Button>
+          </div>
+        )}
+        {/* DEV-ONLY: bypass OAuth and mark pending channel as connected */}
+        {!allSettled && pendingChannel && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs text-[var(--muted-foreground)] border border-dashed border-[var(--border)] hover:border-orange-400 hover:text-orange-500"
+            onClick={() => onApprove({ action: "connected", platform_id: pendingChannel.id })}
+          >
+            🧪 Dev: mark {pendingChannel.label} as connected (skip OAuth)
           </Button>
         )}
       </CardContent>

@@ -40,10 +40,12 @@ export type UnresolvedField = {
 };
 
 export type ChannelConnectionStatus = {
-  id: string;       // platform id e.g. "meta", "google"
-  label: string;    // display name e.g. "Meta", "Google"
-  status: string;   // "not_connected" | "expired" | "connected"
-  detail?: string;  // e.g. "Connected as Acme Business Mgr · ready"
+  id: string;              // platform id / connector_slug e.g. "meta_capi"
+  label: string;           // display name e.g. "Meta"
+  status: string;          // "not_connected" | "skipped" | "connected"
+  detail?: string;         // e.g. "Connected as Acme Business Mgr · ready"
+  connector_slug?: string; // connector slug for the authorize endpoint
+  project_id?: string;     // project_id scoping the OAuth flow
 };
 
 export type CanonicalMappingRow = {

@@ -54,12 +54,6 @@ hitl_interruptions_total = Counter(
     ["interrupt_type"],  # "select_source" | "select_object" | "select_destination" | "mapping_review"
 )
 
-golden_rule_hits_total = Counter(
-    "golden_rule_hits_total",
-    "Total golden-rule upserts (new + occurrence_count increments)",
-    ["operation"],  # "create" | "increment"
-)
-
 
 def setup_metrics(app):
     """Set up Prometheus metrics middleware and endpoints.
