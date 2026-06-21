@@ -101,11 +101,6 @@ class Source(SQLModel, table=True):
 # ---------------------------------------------------------------------------
 
 
-class DestinationStatus(str, Enum):
-    active = "active"
-    disabled = "disabled"
-
-
 class Destination(SQLModel, table=True):
     __tablename__ = "destination"  # type: ignore[assignment]
     __table_args__ = (UniqueConstraint("name", name="uq_destination_name"),)
@@ -116,7 +111,7 @@ class Destination(SQLModel, table=True):
     channel_group: str = Field(nullable=False)
     channel_display_name: str = Field(nullable=False)
     icon_url: Optional[str] = Field(default=None)
-    status: DestinationStatus = Field(default=DestinationStatus.disabled, nullable=False)
+    is_active: bool = Field(default=False, nullable=False)
     is_event_destination: bool = Field(default=False, nullable=False)
     supported_signal_types: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
     match_keys: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
@@ -178,6 +173,13 @@ class DestinationSchemaMapping(SQLModel, table=True):
     field_name: str = Field(nullable=False)
     is_required: bool = Field(default=False, nullable=False)
     is_recommended: bool = Field(default=False, nullable=False)
+    # Destination-specific enum values (overrides canonical if set).
+    # e.g. Meta event_name allows [Purchase, Lead, CompleteRegistration, AddToCart]
+    enum_values: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
+    # How this field is populated: "user_mapped" | "set_at_sync" | "per_stage"
+    source_mode_hint: Optional[str] = Field(default=None)
+    # Destination-specific transform rules, e.g. {"hash": "sha256"}
+    constraints: Optional[dict] = Field(default=None, sa_column=Column(JSON))
     transform_function: Optional[str] = Field(default=None)
     is_deleted: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -487,7 +489,6 @@ __all__ = [
     # Enums
     "ConnectorConfigStatus",
     "DatahashSchemaCategory",
-    "DestinationStatus",
     "IntegrationCreatedVia",
     "IntegrationStatus",
     "ProjectConnectionStatus",

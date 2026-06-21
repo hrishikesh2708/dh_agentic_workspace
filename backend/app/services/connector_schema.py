@@ -15,7 +15,7 @@ from sqlmodel import col, select
 
 from app.agents.agent_config import _AgentSettingsProxy
 from app.models import DatahashSchema
-from app.models import Destination, DestinationSchemaMapping, DestinationStatus
+from app.models import Destination, DestinationSchemaMapping
 from app.models import Source
 from app.schemas import (
     CanonicalSchema,
@@ -166,7 +166,7 @@ class CatalogService:
                 "id": d.name,
                 "label": d.display_name,
                 "description": "",
-                "enabled": d.status == DestinationStatus.active,
+                "enabled": d.is_active,
             }
             for d in destinations
         ]
@@ -184,7 +184,7 @@ class CatalogService:
         """Set of active destination names (lowercased)."""
         stmt = select(Destination).where(
             col(Destination.is_deleted).is_(False),
-            Destination.status == DestinationStatus.active,
+            col(Destination.is_active).is_(True),
         )
         async with self._session_maker() as db:
             result = await db.execute(stmt)
