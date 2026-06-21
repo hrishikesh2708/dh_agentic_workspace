@@ -1,17 +1,19 @@
-"""All SQLModel table definitions in one place.
-
-Dependency order (top → bottom):
-  DatahashSchema
-  → Connector
-  → User → Session
-  → Project
-  → MappingSession → FieldMapping → MappingEmbedding
-  → OAuthPending, ProjectConnection
-  → ProjectConnectionSecret, ProjectSourceModule
-  → ProjectFieldMapping, ProjectIntegration
-"""
-
 # ruff: noqa: D101, D102
+"""SQLModel ORM models for the Datahash backend.
+
+Table dependency order (top → bottom mirrors FK dependency):
+  User → Session
+  Source
+  Destination → DestinationSchemaMapping ← DatahashSchema
+  Project ← Session (FK only, no ORM back-ref on Project)
+  ProjectConnection ← OAuthPending
+  ProjectConnection ← ProjectConnectionSecret
+  ProjectConnection ← ProjectSourceModule ← ProjectFieldMapping
+  ProjectSourceModule ← ProjectIntegration
+  ProjectSourceModule ← ProjectFunnelStage
+  ProjectSourceModule ← ConnectorConfig
+  Project ← AuditLog
+"""
 
 from datetime import UTC, datetime
 from enum import Enum
@@ -21,6 +23,7 @@ from uuid import UUID, uuid4
 import bcrypt
 from sqlalchemy import Index, JSON
 from sqlmodel import Column, Field, Relationship, SQLModel, UniqueConstraint
+
 
 # ---------------------------------------------------------------------------
 # Users & sessions
@@ -38,7 +41,6 @@ class User(SQLModel, table=True):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    # Session defined after User — forward ref required
     sessions: List["Session"] = Relationship(back_populates="user")
 
     def verify_password(self, password: str) -> bool:
@@ -51,11 +53,12 @@ class User(SQLModel, table=True):
 
 
 class Session(SQLModel, table=True):
+    """Agent session — id doubles as the LangGraph thread_id."""
+
     __tablename__ = "session"  # type: ignore[assignment]
 
-    # id IS the LangGraph thread_id
-    id: str = Field(primary_key=True)
-    project_id: UUID = Field(foreign_key="project.id", index=True)  # always required
+    id: str = Field(primary_key=True)  # LangGraph thread_id
+    project_id: UUID = Field(foreign_key="project.id", index=True)
     user_id: int = Field(foreign_key="user.id", index=True)
     name: str = Field(default="")
     status: str = Field(default="active", nullable=False)  # active | completed | abandoned
@@ -84,9 +87,9 @@ class Source(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("name", name="uq_source_name"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(nullable=False)  # e.g. "salesforce"
-    type: SourceType  # crm | database | warehouse | file
-    display_name: str = Field(nullable=False)  # e.g. "Salesforce"
+    name: str = Field(nullable=False)  # slug used in code, e.g. "salesforce"
+    display_name: str = Field(nullable=False)  # human label, e.g. "Salesforce"
+    type: SourceType = Field(nullable=False)
     is_active: bool = Field(default=False, nullable=False)
     is_deleted: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -108,10 +111,10 @@ class Destination(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("name", name="uq_destination_name"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(nullable=False)
+    name: str = Field(nullable=False)  # slug, e.g. "meta_capi"
+    display_name: str = Field(nullable=False)  # e.g. "Meta Conversions API"
     channel_group: str = Field(nullable=False)
     channel_display_name: str = Field(nullable=False)
-    display_name: str = Field(nullable=False)
     icon_url: Optional[str] = Field(default=None)
     status: DestinationStatus = Field(default=DestinationStatus.disabled, nullable=False)
     is_event_destination: bool = Field(default=False, nullable=False)
@@ -127,7 +130,7 @@ class Destination(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Datahash Internal Schema
+# Canonical (Datahash) schema
 # ---------------------------------------------------------------------------
 
 
@@ -147,16 +150,16 @@ class DatahashSchema(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     canonical_key: str = Field(index=True, nullable=False)
-    type: str
-    category: DatahashSchemaCategory
-    label: str
-    display_label: str
+    label: str = Field(nullable=False)
+    display_label: str = Field(nullable=False)
+    type: str = Field(nullable=False)
+    category: DatahashSchemaCategory = Field(nullable=False)
     hint: Optional[str] = Field(default=None)
     enum_values: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     match_reason: Optional[str] = Field(default=None)
+    accepted_sf_types: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     is_per_stage: bool = Field(default=False, nullable=False)
     allow_constant: bool = Field(default=False, nullable=False)
-    accepted_sf_types: List[str] = Field(default_factory=list, sa_column=Column(JSON))
     is_pii: bool = Field(default=False, nullable=False)
     is_deleted: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -164,11 +167,13 @@ class DatahashSchema(SQLModel, table=True):
 
 
 class DestinationSchemaMapping(SQLModel, table=True):
+    """Maps a destination field to a canonical DatahashSchema field."""
+
     __tablename__ = "destination_schema_mapping"  # type: ignore[assignment]
     __table_args__ = (UniqueConstraint("destination_id", "field_name", name="uq_destination_schema_mapping"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    destination_id: int = Field(foreign_key="destination.id", nullable=False)
+    destination_id: int = Field(foreign_key="destination.id", nullable=False, index=True)
     datahash_schema_id: int = Field(foreign_key="datahash_schema.id", nullable=False, index=True)
     field_name: str = Field(nullable=False)
     is_required: bool = Field(default=False, nullable=False)
@@ -179,7 +184,7 @@ class DestinationSchemaMapping(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     destination: Destination = Relationship(back_populates="schema_mappings")
-    schema_field: "DatahashSchema" = Relationship()
+    schema_field: DatahashSchema = Relationship()
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +198,7 @@ class Project(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True)
     user_id: int = Field(foreign_key="user.id", index=True)
-    name: str
+    name: str = Field(nullable=False)
     description: Optional[str] = Field(default=None)
     is_deleted: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -203,7 +208,7 @@ class Project(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# OAuth & connections
+# OAuth pending & project connections
 # ---------------------------------------------------------------------------
 
 
@@ -219,24 +224,33 @@ class ProjectConnectionStatus(str, Enum):
 
 
 class OAuthPending(SQLModel, table=True):
-    __tablename__ = "oauth_pending"  # type: ignore[assignment]
-    __table_args__ = (
-        Index("ix_oauth_pending_project_id", "project_id"),
-        Index("ix_oauth_pending_source_id", "source_id"),
-        Index("ix_oauth_pending_destination_id", "destination_id"),
-    )
+    """Short-lived record tracking an in-flight OAuth authorisation flow.
 
-    state: str = Field(primary_key=True)
-    project_id: UUID = Field(foreign_key="project.id", nullable=False)
+    Exactly one of source_id / destination_id must be non-null (enforced by a
+    CHECK constraint added in the Alembic migration).
+    """
+
+    __tablename__ = "oauth_pending"  # type: ignore[assignment]
+
+    state: str = Field(primary_key=True)  # CSRF-safe random token
+    project_id: UUID = Field(foreign_key="project.id", nullable=False, index=True)
     session_id: str = Field(foreign_key="session.id", nullable=False)
     connection_type: ProjectConnectionType = Field(nullable=False)
-    source_id: Optional[int] = Field(default=None, foreign_key="source.id")
-    destination_id: Optional[int] = Field(default=None, foreign_key="destination.id")
+    source_id: Optional[int] = Field(default=None, foreign_key="source.id", index=True)
+    destination_id: Optional[int] = Field(default=None, foreign_key="destination.id", index=True)
     pkce_verifier: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class ProjectConnection(SQLModel, table=True):
+    """A live connection between a project and a source or destination.
+
+    Exactly one of source_id / destination_id must be non-null (enforced by a
+    CHECK constraint added in the Alembic migration).  Partial unique indexes
+    (WHERE source_id IS NOT NULL / WHERE destination_id IS NOT NULL) enforce
+    one active connection per project per source or destination.
+    """
+
     __tablename__ = "project_connection"  # type: ignore[assignment]
 
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
@@ -251,14 +265,15 @@ class ProjectConnection(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     project: Project = Relationship()
-    source: Optional["Source"] = Relationship()
-    destination: Optional["Destination"] = Relationship()
-    # Defined after — forward refs required
+    source: Optional[Source] = Relationship()
+    destination: Optional[Destination] = Relationship()
     secrets: List["ProjectConnectionSecret"] = Relationship(back_populates="connection")
     source_modules: List["ProjectSourceModule"] = Relationship(back_populates="connection")
 
 
 class ProjectConnectionSecret(SQLModel, table=True):
+    """Encrypted credential pair belonging to a ProjectConnection."""
+
     __tablename__ = "project_connection_secret"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint("project_connection_id", "secret_key", name="uq_connection_secret_key"),
@@ -266,9 +281,9 @@ class ProjectConnectionSecret(SQLModel, table=True):
     )
 
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
-    project_connection_id: UUID = Field(foreign_key="project_connection.id")
-    secret_key: str
-    secret_value: str
+    project_connection_id: UUID = Field(foreign_key="project_connection.id", nullable=False)
+    secret_key: str = Field(nullable=False)
+    secret_value: str = Field(nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -276,7 +291,7 @@ class ProjectConnectionSecret(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Project source modules, field mappings, integrations
+# Source modules, field mappings & integrations
 # ---------------------------------------------------------------------------
 
 
@@ -287,6 +302,12 @@ class SourceModuleStatus(str, Enum):
 
 
 class ProjectSourceModule(SQLModel, table=True):
+    """One Salesforce object (or equivalent) being synced through a source connection.
+
+    source_object stores the API name exactly as the source system uses it,
+    e.g. "Opportunity", "Lead", "Contact", "Custom_Object__c".
+    """
+
     __tablename__ = "project_source_module"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint("project_connection_id", "source_object", name="uq_source_module_object"),
@@ -294,8 +315,8 @@ class ProjectSourceModule(SQLModel, table=True):
     )
 
     id: Optional[UUID] = Field(default_factory=uuid4, primary_key=True)
-    project_connection_id: UUID = Field(foreign_key="project_connection.id")
-    source_object: str = Field(nullable=False)
+    project_connection_id: UUID = Field(foreign_key="project_connection.id", nullable=False)
+    source_object: str = Field(nullable=False)  # Salesforce API name, e.g. "Opportunity"
     display_name: Optional[str] = Field(default=None)
     signal_type: Optional[str] = Field(default=None)
     status: SourceModuleStatus = Field(default=SourceModuleStatus.draft, nullable=False)
@@ -305,12 +326,13 @@ class ProjectSourceModule(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     connection: ProjectConnection = Relationship(back_populates="source_modules")
-    # Defined after — forward refs required
     field_mappings: List["ProjectFieldMapping"] = Relationship(back_populates="source_module")
     integrations: List["ProjectIntegration"] = Relationship(back_populates="source_module")
 
 
 class ProjectFieldMapping(SQLModel, table=True):
+    """Maps one source field to one canonical DatahashSchema field for a module."""
+
     __tablename__ = "project_field_mapping"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint("source_module_id", "datahash_schema_id", name="uq_module_schema_mapping"),
@@ -324,10 +346,10 @@ class ProjectFieldMapping(SQLModel, table=True):
     source_field_path: Optional[str] = Field(default=None)
     is_constant: bool = Field(default=False, nullable=False)
     constant_value: Optional[str] = Field(default=None)
-    is_tombstone: bool = Field(default=False, nullable=False)
     confidence: Optional[float] = Field(default=None)
     confirmed_by: Optional[str] = Field(default=None)
     confirmed_at: Optional[datetime] = Field(default=None)
+    is_tombstone: bool = Field(default=False, nullable=False)  # soft-overridden by a later mapping
     is_deleted: bool = Field(default=False, nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -349,6 +371,8 @@ class IntegrationCreatedVia(str, Enum):
 
 
 class ProjectIntegration(SQLModel, table=True):
+    """Activated pipeline: a source module → a destination connection."""
+
     __tablename__ = "project_integration"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint("source_module_id", "destination_conn_id", "destination_id", name="uq_integration"),
@@ -374,11 +398,13 @@ class ProjectIntegration(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Funnel stages, connector config, audit log
+# Funnel stages, connector config snapshots, audit log
 # ---------------------------------------------------------------------------
 
 
 class ProjectFunnelStage(SQLModel, table=True):
+    """Ordered conversion funnel stage for a source module."""
+
     __tablename__ = "project_funnel_stage"  # type: ignore[assignment]
     __table_args__ = (
         UniqueConstraint("source_module_id", "stage_order", name="uq_funnel_stage_order"),
@@ -407,6 +433,12 @@ class ConnectorConfigStatus(str, Enum):
 
 
 class ConnectorConfig(SQLModel, table=True):
+    """Versioned, immutable config snapshot for a source module.
+
+    When config changes, the previous row is set to superseded and a new row
+    (config_version + 1) is inserted.
+    """
+
     __tablename__ = "connector_config"  # type: ignore[assignment]
     __table_args__ = (
         Index("ix_connector_config_project_id", "project_id"),
@@ -428,6 +460,8 @@ class ConnectorConfig(SQLModel, table=True):
 
 
 class AuditLog(SQLModel, table=True):
+    """Append-only audit trail for project-level actions."""
+
     __tablename__ = "audit_log"  # type: ignore[assignment]
     __table_args__ = (
         Index("ix_audit_log_project_id", "project_id"),
@@ -446,40 +480,40 @@ class AuditLog(SQLModel, table=True):
 
 
 # ---------------------------------------------------------------------------
-# Convenience re-exports
+# Public API surface
 # ---------------------------------------------------------------------------
 
 __all__ = [
-    "FieldCategory",
+    # Enums
+    "ConnectorConfigStatus",
+    "DatahashSchemaCategory",
+    "DestinationStatus",
     "IntegrationCreatedVia",
     "IntegrationStatus",
     "ProjectConnectionStatus",
+    "ProjectConnectionType",
     "SourceModuleStatus",
-    "DatahashSchema",
-    "DatahashSchemaCategory",
-    "Source",
     "SourceType",
-    "OAuthPending",
-    "Project",
-    "ProjectConnection",
-    "ProjectConnectionSecret",
-    "ProjectFieldMapping",
-    "ProjectFunnelStage",
-    "ProjectIntegration",
-    "ProjectSourceModule",
-    "AuditLog",
-    "ConnectorConfig",
-    "ConnectorConfigStatus",
+    # Models — registry
+    "DatahashSchema",
+    "Destination",
+    "DestinationSchemaMapping",
+    "Source",
+    # Models — auth / session
     "Session",
     "User",
+    # Models — projects
+    "Project",
+    # Models — connections
+    "OAuthPending",
+    "ProjectConnection",
+    "ProjectConnectionSecret",
+    # Models — pipelines
+    "ProjectSourceModule",
+    "ProjectFieldMapping",
+    "ProjectIntegration",
+    "ProjectFunnelStage",
+    # Models — config & audit
+    "AuditLog",
+    "ConnectorConfig",
 ]
-
-
-class FieldCategory(str, Enum):
-    identity = "identity"
-    monetary = "monetary"
-    ad_identifier = "ad_identifier"
-    consent = "consent"
-    cart = "cart"
-    event = "event"
-    product = "product"
