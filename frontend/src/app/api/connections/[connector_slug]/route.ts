@@ -25,9 +25,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     return NextResponse.json({ detail: "missing project_id" }, { status: 400 });
   }
 
+  const sessionId = req.headers.get("x-session-id")?.trim();
+  if (!sessionId) {
+    return NextResponse.json({ detail: "missing session_id" }, { status: 400 });
+  }
+
   const res = await backendFetch(
     `/connections/${connector_slug}/authorize?project_id=${projectId}`,
-    { method: "POST" },
+    {
+      method: "POST",
+      headers: { "X-Session-Id": sessionId },
+    },
   );
 
   const text = await res.text();

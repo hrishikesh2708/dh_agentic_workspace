@@ -76,7 +76,18 @@ export function ChatShell() {
           return;
         }
 
-        const created = await apiClient.post<SessionCreateResponse>("/auth/session");
+        const project = loadStoredProject();
+        if (!project) {
+          if (!cancelled) {
+            setError("no_active_project");
+            setLoading(false);
+          }
+          return;
+        }
+
+        const created = await apiClient.post<SessionCreateResponse>("/auth/session", {
+          project_id: project.id,
+        });
         const next: StoredSession = {
           session_id: created.session_id,
           access_token: created.token.access_token,

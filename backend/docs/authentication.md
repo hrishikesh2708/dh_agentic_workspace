@@ -66,11 +66,14 @@ Returns `access_token` and `expires_at`.
 
 ### `POST /api/v1/auth/session`
 
-Create a new chat session. Requires a valid user token.
+Create a new chat session scoped to a project. Requires a valid user token.
+The project must already exist (`POST /projects/` first).
 
 ```bash
 curl -X POST /api/v1/auth/session \
-  -H "Authorization: Bearer <user token>"
+  -H "Authorization: Bearer <user token>" \
+  -H "Content-Type: application/json" \
+  -d '{"project_id": "<project uuid>", "name": "optional session name"}'
 ```
 
 Returns `session_id` and a session-scoped `token`. Use this session token for all subsequent chat requests.

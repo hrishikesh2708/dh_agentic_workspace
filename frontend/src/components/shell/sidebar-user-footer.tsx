@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
+import { authorizeConnection } from "@/lib/authorize-connection";
 import { readProjectIdFromCookie } from "@/lib/project-storage";
+import { loadStoredSessionId } from "@/lib/session-storage";
 
 // Use actual DB connector slugs (sub-connector slugs where applicable).
 // "meta_conversions_api_crm" is the active sub-connector the agent resolves to;
@@ -39,12 +41,13 @@ function debugAuthenticate(connectorSlug: ConnectorSlug, setMsg: (m: string) => 
   const projectId = readProjectIdFromCookie();
   if (!projectId) { setMsg("No active project (set one first)"); return; }
 
+  const sessionId = loadStoredSessionId();
+  if (!sessionId) { setMsg("No active chat session (open /chat first)"); return; }
+
   setMsg("Opening…");
-  fetch(`/api/connections/${connectorSlug}?project_id=${projectId}`, { method: "POST" })
-    .then(r => r.json())
-    .then((data: { auth_url?: string; detail?: string }) => {
-      if (!data.auth_url) { setMsg(`Error: ${data.detail ?? "no auth_url returned"}`); return; }
-      const popup = window.open(data.auth_url, "oauth_debug", "width=600,height=700");
+  authorizeConnection(connectorSlug, projectId, sessionId)
+    .then(({ auth_url }) => {
+      const popup = window.open(auth_url, "oauth_debug", "width=600,height=700");
       if (!popup) { setMsg("Popup blocked — allow popups and retry"); return; }
 
       function onMessage(event: MessageEvent) {
@@ -58,7 +61,9 @@ function debugAuthenticate(connectorSlug: ConnectorSlug, setMsg: (m: string) => 
       }
       window.addEventListener("message", onMessage);
     })
-    .catch(err => setMsg(`Fetch error: ${String(err)}`));
+    .catch((err: unknown) => {
+      setMsg(`Error: ${err instanceof Error ? err.message : "auth failed"}`);
+    });
 }
 
 export function SidebarUserFooter({ collapsed }: { collapsed: boolean }) {

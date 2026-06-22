@@ -256,6 +256,7 @@ export function HeadlessChat({
         pending ? (
           <HitlApprovalCard
             payload={pending.value}
+            sessionId={sessionId}
             onApprove={(response) => resolve(response)}
             onReject={(reason) =>
               resolve({ approved: false, ...(reason ? { reason } : {}) })

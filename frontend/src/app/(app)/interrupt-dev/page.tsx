@@ -59,6 +59,7 @@
 import { useState } from "react";
 import { HitlApprovalCard } from "@/components/chat/interrupts/hitl-approval-card";
 import type { ApprovalInterruptPayload } from "@/hooks/use-headless-interrupt";
+import { loadStoredSessionId } from "@/lib/session-storage";
 
 // ── Mock payloads (one per interrupt type) ─────────────────────────────────
 
@@ -370,6 +371,7 @@ export default function InterruptDevPage() {
               {/* Card */}
               <HitlApprovalCard
                 payload={stage.payload}
+                sessionId={loadStoredSessionId() ?? "dev-preview-session"}
                 onApprove={(response) => handleApprove(index, response)}
                 onReject={(reason) => handleReject(index, reason)}
               />

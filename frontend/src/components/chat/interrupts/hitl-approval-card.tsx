@@ -13,9 +13,11 @@ import type {
   UnresolvedField,
 } from "@/hooks/use-headless-interrupt";
 import { normalizeInterruptPayload } from "@/lib/normalize-interrupt-payload";
+import { authorizeConnection } from "@/lib/authorize-connection";
 
 export interface HitlApprovalCardProps {
   payload: ApprovalInterruptPayload;
+  sessionId: string;
   onApprove: (response: unknown) => void;
   onReject: (reason?: string) => void;
 }
@@ -901,7 +903,7 @@ const CHANNEL_AVATAR_COLORS: Record<string, string> = {
   bing:           "#008373",
 };
 
-function CheckChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
+function CheckChannelsCard({ payload, sessionId, onApprove }: HitlApprovalCardProps) {
   const channels = (payload.channels ?? []) as ChannelConnectionStatus[];
   const pendingChannel = channels.find((ch) => ch.status !== "connected" && ch.status !== "skipped");
   const allSettled = !pendingChannel;
@@ -923,12 +925,7 @@ function CheckChannelsCard({ payload, onApprove }: HitlApprovalCardProps) {
     setErrors((e) => ({ ...e, [ch.id]: "" }));
 
     try {
-      const res = await fetch(
-        `/api/connections/${connectorSlug}?project_id=${projectId}`,
-        { method: "POST" },
-      );
-      if (!res.ok) throw new Error(`Authorize failed: ${res.status}`);
-      const { auth_url }: { auth_url: string } = await res.json();
+      const { auth_url } = await authorizeConnection(connectorSlug, projectId, sessionId);
 
       const popup = window.open(auth_url, "oauth_popup", "width=600,height=700");
       if (!popup) {
@@ -1566,7 +1563,7 @@ function ActivationConfirmTokenCard({ payload, onApprove, onReject }: HitlApprov
 
 // ── Connect source card (OAuth handoff) ──────────────────────────────────
 
-function ConnectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
+function ConnectSourceCard({ payload, sessionId, onApprove }: HitlApprovalCardProps) {
   const sourceLabel  = payload.source_label  ?? "Source";
   const connectorSlug = payload.connector_slug as string | undefined;
   const projectId    = payload.project_id    as string | undefined;
@@ -1583,13 +1580,7 @@ function ConnectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
     setError(null);
 
     try {
-      // Route through the Next.js BFF so the httpOnly JWT is forwarded
-      const res = await fetch(
-        `/api/connections/${connectorSlug}?project_id=${projectId}`,
-        { method: "POST" },
-      );
-      if (!res.ok) throw new Error(`Authorize failed: ${res.status}`);
-      const { auth_url }: { auth_url: string } = await res.json();
+      const { auth_url } = await authorizeConnection(connectorSlug, projectId, sessionId);
 
       // Open OAuth popup and wait for postMessage from callback
       const popup = window.open(auth_url, "oauth_popup", "width=600,height=700");

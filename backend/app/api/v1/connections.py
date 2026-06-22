@@ -40,6 +40,7 @@ from app.core.logging import logger
 from app.models import Destination
 from app.models import OAuthPending
 from app.models import Project
+from app.models import Session as AgentSession
 from app.models import ProjectConnection, ProjectConnectionStatus, ProjectConnectionType
 from app.models import ProjectConnectionSecret
 from app.models import Source
@@ -244,6 +245,10 @@ async def authorize(
     Inserts an OAuthPending row with the PKCE verifier, then returns
     the provider authorization URL for the frontend to open.
     """
+    session_id = (request.headers.get("x-session-id") or "").strip()
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing X-Session-Id header")
+
     verifier, challenge = _pkce_pair()
     state_token = secrets.token_urlsafe(32)
     redirect_uri = _callback_url(request, connector_slug)
@@ -251,6 +256,12 @@ async def authorize(
     with _get_engine().begin() as conn_raw:
         with Session(conn_raw) as db:
             _assert_project_owned(db, project_id, user.id)
+
+            chat_session = db.get(AgentSession, session_id)
+            if not chat_session or chat_session.is_deleted:
+                raise HTTPException(status_code=404, detail="Session not found")
+            if chat_session.project_id != project_id:
+                raise HTTPException(status_code=404, detail="Session not found for this project")
 
             oauth_slug = _canonical_oauth_slug(connector_slug)
 
@@ -260,7 +271,7 @@ async def authorize(
             pending = OAuthPending(
                 state=state_token,
                 project_id=project_id,
-                session_id=request.headers.get("x-session-id", ""),
+                session_id=session_id,
                 connection_type=conn_type,
                 source_id=source_id,
                 destination_id=destination_id,
