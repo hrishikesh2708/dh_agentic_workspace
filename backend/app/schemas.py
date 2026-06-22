@@ -81,6 +81,18 @@ class UserResponse(BaseResponse):
     token: Token
 
 
+class SessionCreate(BaseModel):
+    """Request body for POST /auth/session — project must exist before session starts."""
+
+    project_id: UUID
+    name: str = Field(default="", max_length=100)
+
+    @field_validator("name")
+    @classmethod
+    def sanitize_name(cls, v: str) -> str:
+        return re.sub(r'[<>{}[\]()\'"`]', "", v)
+
+
 class SessionResponse(BaseResponse):
     session_id: str
     name: str = Field(default="", max_length=100)

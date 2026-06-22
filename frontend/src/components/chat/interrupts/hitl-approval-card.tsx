@@ -1130,6 +1130,440 @@ function ActivateConfirmCard({ payload, onApprove, onReject }: HitlApprovalCardP
 }
 
 
+// ── Funnel prompt card ────────────────────────────────────────────────────
+// type: "funnel_prompt"
+// Resume: { enabled: bool, trigger_field: string | null }
+
+type PicklistFieldOption = { name: string; label: string };
+
+function FunnelPromptCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const picklistFields = (payload.picklist_fields ?? []) as PicklistFieldOption[];
+  const suggested = (payload.suggested_trigger_field as string | undefined) ?? picklistFields[0]?.name ?? "";
+  const infoText = payload.info_text as string | undefined;
+
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [triggerField, setTriggerField] = useState<string>(suggested);
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-4 space-y-4">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Funnel setup
+        </p>
+
+        {infoText && (
+          <div className="rounded-lg border border-blue-200 dark:border-blue-800/60 bg-blue-500/5 px-3 py-2">
+            <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">{infoText}</p>
+          </div>
+        )}
+
+        {/* Enable / skip toggle */}
+        <div className="flex gap-2">
+          {[
+            { value: true,  label: "Yes, set up funnel" },
+            { value: false, label: "Skip for now" },
+          ].map(({ value, label }) => {
+            const isSelected = enabled === value;
+            return (
+              <button
+                key={String(value)}
+                type="button"
+                onClick={() => setEnabled(value)}
+                style={{ borderRadius: isSelected ? "8px" : "9999px" }}
+                className={[
+                  "flex-1 inline-flex items-center justify-center gap-2 border px-3 py-2 text-sm font-medium",
+                  "transition-all duration-300 ease-in-out cursor-pointer",
+                  isSelected
+                    ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                    : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:border-[var(--primary)]/40",
+                ].join(" ")}
+              >
+                <span className={[
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-all",
+                  isSelected
+                    ? "border-[var(--primary)] bg-[var(--primary)]"
+                    : "border-[var(--muted-foreground)]/50",
+                ].join(" ")}>
+                  {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </span>
+                {label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Trigger field picker — only shown when enabled */}
+        {enabled && picklistFields.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-[var(--muted-foreground)]">Stage trigger field</p>
+            <select
+              value={triggerField}
+              onChange={(e) => setTriggerField(e.target.value)}
+              className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] cursor-pointer"
+            >
+              {picklistFields.map((f) => (
+                <option key={f.name} value={f.name}>
+                  {f.label || f.name}
+                  {f.name === suggested ? " (suggested)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        <Button
+          type="button"
+          className="w-full"
+          disabled={enabled === null}
+          onClick={() => onApprove({ enabled: enabled ?? false, trigger_field: enabled ? triggerField : null })}
+        >
+          {enabled === null ? "Choose an option above" : enabled ? "Continue with funnel" : "Skip funnel"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Funnel stages card ────────────────────────────────────────────────────
+// type: "funnel_stages"
+// Resume: { stages: [{ stage_name, trigger_value, time_field, value_field, per_destination }] }
+
+type FunnelStageRow = {
+  stage_name: string;
+  trigger_value: string;
+  time_field: string;
+  value_field: string;
+  per_destination: Record<string, { event_name: string }>;
+};
+
+function FunnelStagesCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const triggerField = payload.trigger_field as string | undefined ?? "Stage";
+  const suggestedStages = (payload.suggested_stages ?? []) as Array<{
+    stage_name: string; trigger_value: string; time_field?: string; value_field?: string;
+    per_destination?: Record<string, unknown>;
+  }>;
+  const datetimeFields = (payload.datetime_fields ?? []) as string[];
+  const numericFields  = (payload.numeric_fields  ?? []) as string[];
+  const activeDestinations = (payload.active_destinations ?? []) as string[];
+  const infoText = payload.info_text as string | undefined;
+
+  const [stages, setStages] = useState<FunnelStageRow[]>(() =>
+    suggestedStages.map((s) => ({
+      stage_name:      s.stage_name ?? s.trigger_value ?? "",
+      trigger_value:   s.trigger_value ?? "",
+      time_field:      s.time_field ?? "",
+      value_field:     s.value_field ?? "",
+      per_destination: activeDestinations.reduce<Record<string, { event_name: string }>>((acc, d) => {
+        acc[d] = { event_name: "" };
+        return acc;
+      }, {}),
+    })),
+  );
+
+  function updateStage<K extends keyof FunnelStageRow>(i: number, key: K, value: FunnelStageRow[K]) {
+    setStages((prev) => prev.map((s, idx) => idx === i ? { ...s, [key]: value } : s));
+  }
+
+  function updateDestEventName(i: number, dest: string, eventName: string) {
+    setStages((prev) =>
+      prev.map((s, idx) =>
+        idx === i
+          ? { ...s, per_destination: { ...s.per_destination, [dest]: { event_name: eventName } } }
+          : s,
+      ),
+    );
+  }
+
+  const hasStages = stages.length > 0;
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-4 space-y-4">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Funnel stages — {triggerField}
+        </p>
+
+        {infoText && (
+          <div className="rounded-lg border border-blue-200 dark:border-blue-800/60 bg-blue-500/5 px-3 py-2">
+            <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">{infoText}</p>
+          </div>
+        )}
+
+        {hasStages ? (
+          <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+            {stages.map((stage, i) => (
+              <div key={i} className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3 space-y-2">
+                {/* Stage name + trigger value header */}
+                <div className="flex items-center gap-2">
+                  <span className="h-5 w-5 shrink-0 rounded-full bg-[var(--primary)]/10 text-[var(--primary)] text-xs font-bold flex items-center justify-center">
+                    {i + 1}
+                  </span>
+                  <input
+                    type="text"
+                    value={stage.stage_name}
+                    onChange={(e) => updateStage(i, "stage_name", e.target.value)}
+                    placeholder="Stage name"
+                    className="flex-1 h-8 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 text-sm text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                  />
+                  <span className="text-[10px] text-[var(--muted-foreground)] bg-[var(--secondary)] px-2 py-0.5 rounded-full shrink-0">
+                    {stage.trigger_value}
+                  </span>
+                </div>
+
+                {/* Optional fields row */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-[10px] text-[var(--muted-foreground)] mb-0.5">Time field</p>
+                    <select
+                      value={stage.time_field}
+                      onChange={(e) => updateStage(i, "time_field", e.target.value)}
+                      className="w-full h-7 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 text-xs text-[var(--foreground)] focus:outline-none cursor-pointer"
+                    >
+                      <option value="">None</option>
+                      {datetimeFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-[var(--muted-foreground)] mb-0.5">Value field</p>
+                    <select
+                      value={stage.value_field}
+                      onChange={(e) => updateStage(i, "value_field", e.target.value)}
+                      className="w-full h-7 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 text-xs text-[var(--foreground)] focus:outline-none cursor-pointer"
+                    >
+                      <option value="">None</option>
+                      {numericFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Per-destination event name */}
+                {activeDestinations.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-[var(--muted-foreground)]">Event name per destination</p>
+                    {activeDestinations.map((dest) => (
+                      <div key={dest} className="flex items-center gap-2">
+                        <span className="text-xs text-[var(--muted-foreground)] w-24 shrink-0 truncate">{dest}</span>
+                        <input
+                          type="text"
+                          value={stage.per_destination[dest]?.event_name ?? ""}
+                          onChange={(e) => updateDestEventName(i, dest, e.target.value)}
+                          placeholder="e.g. Purchase"
+                          className="flex-1 h-7 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 text-xs text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-[var(--muted-foreground)] italic">
+            No stage values found in schema. Add them manually if needed.
+          </p>
+        )}
+
+        <Button
+          type="button"
+          className="w-full"
+          disabled={stages.some((s) => !s.stage_name.trim())}
+          onClick={() =>
+            onApprove({
+              stages: stages.map((s) => ({
+                stage_name:      s.stage_name.trim(),
+                trigger_value:   s.trigger_value,
+                time_field:      s.time_field || null,
+                value_field:     s.value_field || null,
+                per_destination: s.per_destination,
+              })),
+            })
+          }
+        >
+          {stages.length === 0
+            ? "Continue without stages"
+            : `Confirm ${stages.length} stage${stages.length !== 1 ? "s" : ""}`}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Validation errors card ────────────────────────────────────────────────
+// type: "validation_errors"
+// Resume: { action: "edit_mapping" | "skip_errors" | "retry" }
+
+function ValidationErrorsCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const errors   = (payload.errors   ?? []) as string[];
+  const warnings = (payload.warnings ?? []) as string[];
+  const infoText = payload.info_text as string | undefined;
+  const hasErrors = errors.length > 0;
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-4 space-y-3">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Validation issues
+        </p>
+
+        {/* Errors — red */}
+        {errors.length > 0 && (
+          <div className="flex rounded-md border border-[var(--border)]/60 overflow-hidden">
+            <div className="w-1 shrink-0 bg-red-500" />
+            <div className="px-4 py-3 flex-1 bg-red-500/[0.03] space-y-1.5">
+              <p className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">
+                {errors.length} error{errors.length !== 1 ? "s" : ""}
+              </p>
+              {errors.map((e, i) => (
+                <p key={i} className="text-sm text-[var(--foreground)] leading-snug">{e}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Warnings — amber */}
+        {warnings.length > 0 && (
+          <div className="flex rounded-md border border-[var(--border)]/60 overflow-hidden">
+            <div className="w-1 shrink-0 bg-amber-500" />
+            <div className="px-4 py-3 flex-1 bg-amber-500/[0.03] space-y-1.5">
+              <p className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">
+                {warnings.length} warning{warnings.length !== 1 ? "s" : ""}
+              </p>
+              {warnings.map((w, i) => (
+                <p key={i} className="text-sm text-[var(--muted-foreground)] leading-snug">{w}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {infoText && (
+          <p className="text-xs text-[var(--muted-foreground)]">{infoText}</p>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            className="flex-1"
+            onClick={() => onApprove({ action: "edit_mapping" })}
+          >
+            Fix mapping
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1"
+            onClick={() => onApprove({ action: "retry" })}
+          >
+            Retry
+          </Button>
+        </div>
+        {hasErrors && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs text-[var(--muted-foreground)] border border-dashed border-[var(--border)] hover:border-amber-400 hover:text-amber-500"
+            onClick={() => onApprove({ action: "skip_errors" })}
+          >
+            Skip errors and proceed anyway
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Activation confirm card (token-gated) ─────────────────────────────────
+// type: "activation_confirm"
+// Resume: { token: str }  — user must type back the UUID token shown
+
+function ActivationConfirmTokenCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
+  const token          = (payload.token          as string | undefined) ?? "";
+  const summary        = (payload.summary        as string[] | undefined) ?? [];
+  const infoText       = (payload.info_text      as string | undefined);
+  const confirmLabel   = (payload.confirm_label  as string | undefined) ?? "Activate";
+  const secondaryLabel = (payload.secondary_label as string | undefined) ?? "Go back";
+
+  const [input, setInput] = useState("");
+  const matches = input.trim() === token;
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-4 space-y-4">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Confirm activation
+        </p>
+
+        {/* Summary block — green left border */}
+        {summary.length > 0 && (
+          <div className="flex rounded-md border border-[var(--border)]/60 overflow-hidden">
+            <div className="w-1 shrink-0 bg-green-500" />
+            <div className="px-4 py-3 flex-1 bg-green-500/[0.03] space-y-1">
+              {summary.map((line, i) => (
+                <p key={i} className="text-sm text-[var(--foreground)] leading-snug">{line}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Confirmation token — monospace, prominent */}
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--secondary)] px-4 py-3 space-y-1">
+          <p className="text-[10px] font-semibold text-[var(--muted-foreground)] uppercase tracking-widest">
+            Confirmation code
+          </p>
+          <p className="font-mono text-sm font-semibold text-[var(--foreground)] select-all break-all">
+            {token}
+          </p>
+        </div>
+
+        {infoText && (
+          <p className="text-xs text-[var(--muted-foreground)]">{infoText}</p>
+        )}
+
+        {/* Token input */}
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="Type the code above to confirm…"
+          className={[
+            "w-full h-9 rounded-lg border px-3 text-sm font-mono bg-[var(--background)] text-[var(--foreground)]",
+            "focus:outline-none focus:ring-1 transition-colors",
+            input && !matches
+              ? "border-red-400 focus:ring-red-400"
+              : matches
+              ? "border-green-500 focus:ring-green-500"
+              : "border-[var(--border)] focus:ring-[var(--primary)]",
+          ].join(" ")}
+        />
+
+        {input && !matches && (
+          <p className="text-xs text-red-500 -mt-2">Code does not match — check for typos.</p>
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            className="flex-1"
+            disabled={!matches}
+            onClick={() => onApprove({ token: input.trim() })}
+          >
+            {matches ? confirmLabel : "Enter code to activate"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="flex-1"
+            onClick={() => onReject("go_back")}
+          >
+            {secondaryLabel}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Connect source card (OAuth handoff) ──────────────────────────────────
 
 function ConnectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
@@ -1212,6 +1646,528 @@ function ConnectSourceCard({ payload, onApprove }: HitlApprovalCardProps) {
   );
 }
 
+
+// ── Mapping matrix card ───────────────────────────────────────────────────
+function MappingMatrixCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
+  const rows = (payload.rows ?? []) as Array<{
+    canonical_key: string; label: string; source_field: string | null;
+    status: string; cells: Record<string, { field: string | null; status: string }>;
+  }>;
+  const destinations = (payload.destinations ?? []) as Array<{ id: string; label: string }>;
+  const sourceFields = (payload.source_fields ?? []) as string[];
+
+  const [overrides, setOverrides] = useState<Record<string, string>>(() =>
+    Object.fromEntries(rows.map((r) => [r.canonical_key, r.source_field ?? ""]))
+  );
+
+  function setField(canonicalKey: string, value: string) {
+    setOverrides((prev) => ({ ...prev, [canonicalKey]: value }));
+  }
+
+  const missingRequired = rows.filter(
+    (r) => r.status === "missing" && !overrides[r.canonical_key]
+  ).length;
+
+  function handleApprove() {
+    const updatedRows = rows.map((r) => ({
+      ...r,
+      source_field: overrides[r.canonical_key] || r.source_field,
+    }));
+    onApprove({ rows: updatedRows });
+  }
+
+  const statusDot = (status: string) => {
+    const cls =
+      status === "mapped"      ? "bg-green-500" :
+      status === "needs_input" ? "bg-amber-500" :
+      status === "missing"     ? "bg-red-500"   : "bg-[var(--muted-foreground)]/30";
+    return <span className={`h-2 w-2 rounded-full shrink-0 inline-block ${cls}`} />;
+  };
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-3">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Mapping matrix
+        </p>
+
+        <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
+          <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
+            <thead>
+              <tr className="bg-[var(--secondary)]">
+                <th className="px-3 py-2 text-left text-xs font-medium text-[var(--muted-foreground)] w-36">
+                  What Signals needs
+                </th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-[var(--muted-foreground)] w-44 border-l border-[var(--border)]">
+                  Your SF field
+                </th>
+                {destinations.map((d) => (
+                  <th key={d.id} className="px-3 py-2 text-left text-xs font-medium text-[var(--muted-foreground)] border-l border-[var(--border)] w-28">
+                    {d.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => {
+                const currentSource = overrides[row.canonical_key] ?? "";
+                return (
+                  <tr key={row.canonical_key} className={`border-t border-[var(--border)] ${i % 2 === 0 ? "" : "bg-[var(--secondary)]/30"}`}>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        {statusDot(overrides[row.canonical_key] ? "mapped" : row.status)}
+                        <span className="text-xs font-medium text-[var(--foreground)] truncate">{row.label}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 border-l border-[var(--border)]">
+                      {sourceFields.length > 0 ? (
+                        <select
+                          value={currentSource}
+                          onChange={(e) => setField(row.canonical_key, e.target.value)}
+                          className="w-full h-7 rounded border border-[var(--border)] bg-[var(--background)] px-2 text-xs text-[var(--foreground)] focus:outline-none cursor-pointer"
+                        >
+                          <option value="">— not mapped —</option>
+                          {sourceFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      ) : (
+                        <span className="text-xs text-[var(--foreground)] truncate">{currentSource || "—"}</span>
+                      )}
+                    </td>
+                    {destinations.map((d) => {
+                      const cell = row.cells[d.id];
+                      return (
+                        <td key={d.id} className="px-3 py-2 border-l border-[var(--border)]">
+                          <div className="flex items-center gap-1.5">
+                            {cell ? statusDot(currentSource ? "mapped" : cell.status) : null}
+                            <span className="text-xs text-[var(--muted-foreground)] truncate">
+                              {cell?.field ?? (cell ? "—" : "n/a")}
+                            </span>
+                          </div>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          {[
+            { color: "bg-green-500", label: "mapped" },
+            { color: "bg-amber-500", label: "needs input" },
+            { color: "bg-red-500",   label: "missing (required)" },
+          ].map(({ color, label }) => (
+            <span key={label} className="flex items-center gap-1 text-[10px] text-[var(--muted-foreground)] uppercase tracking-wider">
+              <span className={`h-2 w-2 rounded-full ${color}`} /> {label}
+            </span>
+          ))}
+        </div>
+
+        <div className="flex gap-2">
+          <Button type="button" className="flex-1" onClick={handleApprove}>
+            {missingRequired > 0
+              ? `Continue with ${missingRequired} field${missingRequired !== 1 ? "s" : ""} unmapped`
+              : "Approve mapping"}
+          </Button>
+          <Button type="button" variant="outline" className="flex-1" onClick={() => onReject("edit_manual")}>
+            Edit manually
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Google Ads account picker card ────────────────────────────────────────
+function GoogleAdsAccountCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const accounts = (payload.accounts ?? []) as Array<{ value: string; label: string }>;
+  const infoText = payload.info_text as string | undefined;
+  const [selected, setSelected] = useState<string>(accounts[0]?.value ?? "");
+  const selectedAccount = accounts.find((a) => a.value === selected);
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-4">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Google Ads account
+        </p>
+        {infoText && (
+          <div className="rounded-lg border border-blue-200 dark:border-blue-800/60 bg-blue-500/5 px-3 py-2">
+            <p className="text-xs text-blue-700 dark:text-blue-400">{infoText}</p>
+          </div>
+        )}
+        {accounts.length === 0 ? (
+          <p className="text-sm text-[var(--muted-foreground)] italic">No Google Ads accounts found.</p>
+        ) : (
+          <div className="space-y-2">
+            {accounts.map((acc) => {
+              const isSelected = selected === acc.value;
+              return (
+                <button
+                  key={acc.value}
+                  type="button"
+                  onClick={() => setSelected(acc.value)}
+                  style={{ borderRadius: isSelected ? "8px" : "9999px" }}
+                  className={[
+                    "w-full inline-flex items-center gap-2 border px-3 py-2 text-sm font-medium text-left",
+                    "transition-all duration-300 cursor-pointer",
+                    isSelected
+                      ? "border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]"
+                      : "border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] hover:bg-[var(--secondary)]",
+                  ].join(" ")}
+                >
+                  <span className={[
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-all",
+                    isSelected ? "border-[var(--primary)] bg-[var(--primary)]" : "border-[var(--muted-foreground)]/50",
+                  ].join(" ")}>
+                    {isSelected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate">{acc.label}</p>
+                    <p className="text-xs text-[var(--muted-foreground)] truncate">{acc.value}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <Button
+          type="button"
+          className="w-full"
+          disabled={!selected}
+          onClick={() => onApprove({ account_id: selected, account_label: selectedAccount?.label ?? selected })}
+        >
+          {selected ? `Use account ${selectedAccount?.label ?? selected}` : "Select an account"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Google conversion action picker card ──────────────────────────────────
+function GoogleConversionActionCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const actions = (payload.conversion_actions ?? []) as Array<{ value: string; label: string }>;
+  const accountId = payload.account_id as string | undefined;
+  const [selected, setSelected] = useState<string>(actions[0]?.value ?? "");
+  const selectedAction = actions.find((a) => a.value === selected);
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-4">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Conversion action
+        </p>
+        {accountId && (
+          <p className="text-xs text-[var(--muted-foreground)]">Account: {accountId}</p>
+        )}
+        {actions.length === 0 ? (
+          <p className="text-sm text-[var(--muted-foreground)] italic">No conversion actions found.</p>
+        ) : (
+          <select
+            value={selected}
+            onChange={(e) => setSelected(e.target.value)}
+            className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] cursor-pointer"
+          >
+            {!selected && <option value="" disabled>Select a conversion action…</option>}
+            {actions.map((a) => (
+              <option key={a.value} value={a.value}>{a.label}</option>
+            ))}
+          </select>
+        )}
+        <Button
+          type="button"
+          className="w-full"
+          disabled={!selected}
+          onClick={() => onApprove({ conversion_action: selected, conversion_action_label: selectedAction?.label ?? selected })}
+        >
+          {selected ? `Use ${selectedAction?.label ?? selected}` : "Select a conversion action"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Coverage breakdown card ───────────────────────────────────────────────
+function CoverageBreakdownCard({ payload, onApprove, onReject }: HitlApprovalCardProps) {
+  const destinations = (payload.destinations_breakdown ?? payload.destinations ?? []) as Array<{
+    destination: string; coverage_pct: number; match_keys_covered: string[];
+    match_keys_missing: string[]; status: string; required_count: number; mapped_count: number;
+  }>;
+  const overallPct = (payload.overall_pct as number | undefined) ?? 0;
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+            Coverage breakdown
+          </p>
+          <span className={`text-sm font-semibold ${overallPct >= 80 ? "text-green-600 dark:text-green-400" : overallPct >= 50 ? "text-amber-600 dark:text-amber-400" : "text-red-500"}`}>
+            {overallPct.toFixed(0)}% overall
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {destinations.map((dest) => {
+            const pct = dest.coverage_pct;
+            const barColor = pct >= 80 ? "bg-green-500" : pct >= 50 ? "bg-amber-500" : "bg-red-500";
+            return (
+              <div key={dest.destination} className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-[var(--foreground)]">
+                    {dest.destination.replace(/_/g, " ").toUpperCase()}
+                  </span>
+                  <span className={`text-xs font-semibold ${dest.status === "ready" ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}`}>
+                    {pct.toFixed(0)}% — {dest.mapped_count}/{dest.required_count} fields
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-[var(--secondary)] overflow-hidden">
+                  <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct}%` }} />
+                </div>
+                {dest.match_keys_missing.length > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Missing match keys: {dest.match_keys_missing.join(", ")}
+                  </p>
+                )}
+                {dest.match_keys_covered.length > 0 && dest.match_keys_missing.length === 0 && (
+                  <p className="text-xs text-green-600 dark:text-green-400">
+                    All match keys covered: {dest.match_keys_covered.join(", ")}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-2">
+          <Button type="button" className="flex-1" onClick={() => onApprove({ acknowledged: true })}>
+            Continue
+          </Button>
+          <Button type="button" variant="outline" className="flex-1" onClick={() => onReject("fix_mapping")}>
+            Fix mapping
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Canonical needs card ──────────────────────────────────────────────────
+function CanonicalNeedsCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const needs = (payload.needs ?? []) as Array<{
+    canonical_key: string; label: string; reason: string; status: string; required: boolean;
+  }>;
+  const missing = needs.filter((n) => n.status === "missing");
+  const mapped = needs.filter((n) => n.status === "mapped");
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+            What Signals needs
+          </p>
+          <span className="text-xs text-[var(--muted-foreground)]">
+            {mapped.length}/{needs.length} mapped
+          </span>
+        </div>
+
+        <div className="space-y-1.5">
+          {needs.map((n) => (
+            <div
+              key={n.canonical_key}
+              className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 ${
+                n.status === "mapped"
+                  ? "border-green-200 dark:border-green-800/50 bg-green-500/5"
+                  : n.required
+                  ? "border-red-200 dark:border-red-800/50 bg-red-500/5"
+                  : "border-[var(--border)] bg-[var(--background)]"
+              }`}
+            >
+              <span className={`mt-1 h-2 w-2 rounded-full shrink-0 ${
+                n.status === "mapped" ? "bg-green-500" : n.required ? "bg-red-500" : "bg-amber-500"
+              }`} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-[var(--foreground)]">{n.label}</p>
+                {n.reason && (
+                  <p className="text-xs text-[var(--muted-foreground)] leading-relaxed">{n.reason}</p>
+                )}
+              </div>
+              <span className={`shrink-0 text-xs font-medium ${
+                n.status === "mapped" ? "text-green-600 dark:text-green-400" : "text-[var(--muted-foreground)]"
+              }`}>
+                {n.status === "mapped" ? "mapped" : n.required ? "required" : "optional"}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <Button
+          type="button"
+          className="w-full"
+          onClick={() => onApprove({ acknowledged: true })}
+        >
+          {missing.length === 0 ? "All fields mapped — continue" : `Continue with ${missing.length} unmapped`}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Validation dry-run card (enhanced with named checks + sample payloads) ─
+function ValidationDryRunCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const checks = (payload.checks ?? []) as Array<{
+    name: string; passed: boolean; severity: string; message: string;
+    sample_payload?: Record<string, unknown>;
+  }>;
+  const overallPassed = payload.overall_passed as boolean | undefined;
+  const infoText = payload.info_text as string | undefined;
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const errors = checks.filter((c) => !c.passed && c.severity === "error");
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)] overflow-hidden shadow-sm">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+            Validation results
+          </p>
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+            overallPassed
+              ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+              : "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+          }`}>
+            {overallPassed ? "Passed" : `${errors.length} issue${errors.length !== 1 ? "s" : ""}`}
+          </span>
+        </div>
+
+        {infoText && (
+          <p className="text-xs text-[var(--muted-foreground)]">{infoText}</p>
+        )}
+
+        <div className="space-y-1.5">
+          {checks.map((check) => {
+            const isExpanded = expanded === check.name;
+            const hasSample = check.sample_payload && Object.keys(check.sample_payload).length > 0;
+            const accent =
+              check.passed ? "border-green-200 dark:border-green-800/50 bg-green-500/[0.03]" :
+              check.severity === "error" ? "border-red-200 dark:border-red-800/50 bg-red-500/[0.03]" :
+              "border-amber-200 dark:border-amber-800/50 bg-amber-500/[0.03]";
+            const dot =
+              check.passed ? "bg-green-500" :
+              check.severity === "error" ? "bg-red-500" : "bg-amber-500";
+
+            return (
+              <div key={check.name} className={`rounded-lg border overflow-hidden ${accent}`}>
+                <button
+                  type="button"
+                  className="w-full flex items-start gap-2.5 px-3 py-2 text-left cursor-pointer"
+                  onClick={() => hasSample && setExpanded(isExpanded ? null : check.name)}
+                >
+                  <span className={`mt-1.5 h-2 w-2 rounded-full shrink-0 ${dot}`} />
+                  <span className="flex-1 text-sm text-[var(--foreground)] leading-snug">{check.message}</span>
+                  {hasSample && (
+                    <span className="text-[10px] text-[var(--muted-foreground)] shrink-0 mt-0.5">
+                      {isExpanded ? "hide" : "sample"}
+                    </span>
+                  )}
+                </button>
+                {isExpanded && hasSample && (
+                  <div className="border-t border-[var(--border)]/50 px-3 py-2 bg-[var(--background)]">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mb-1.5">
+                      Sample payload (masked)
+                    </p>
+                    <pre className="text-xs text-[var(--foreground)] overflow-x-auto whitespace-pre-wrap break-all">
+                      {JSON.stringify(check.sample_payload, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex gap-2">
+          <Button type="button" className="flex-1" onClick={() => onApprove({ action: "edit_mapping" })}>
+            Fix mapping
+          </Button>
+          <Button type="button" variant="outline" className="flex-1" onClick={() => onApprove({ action: "retry" })}>
+            Retry
+          </Button>
+        </div>
+        {errors.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs text-[var(--muted-foreground)] border border-dashed border-[var(--border)] hover:border-amber-400 hover:text-amber-500"
+            onClick={() => onApprove({ action: "skip_errors" })}
+          >
+            Skip errors and proceed anyway
+          </Button>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Destination metadata collection card ─────────────────────────────────
+function DestinationMetadataCard({ payload, onApprove }: HitlApprovalCardProps) {
+  const destLabel = (payload.destination_label as string | undefined) ?? "destination";
+  const fields = (payload.fields ?? []) as Array<{
+    name: string; label: string; placeholder?: string; required?: boolean;
+  }>;
+
+  const [values, setValues] = useState<Record<string, string>>(
+    Object.fromEntries(fields.map((f) => [f.name, ""]))
+  );
+
+  const requiredFilled = fields
+    .filter((f) => f.required)
+    .every((f) => (values[f.name] || "").trim().length > 0);
+
+  return (
+    <Card className="border-[var(--border)] bg-[var(--card)]">
+      <CardContent className="p-4 space-y-4">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          {destLabel} setup
+        </p>
+
+        <div className="space-y-3">
+          {fields.map((f) => (
+            <div key={f.name} className="space-y-1">
+              <label className="text-xs font-medium text-[var(--foreground)]">
+                {f.label}
+                {f.required && <span className="text-red-500 ml-0.5">*</span>}
+              </label>
+              <input
+                type="text"
+                value={values[f.name] ?? ""}
+                onChange={(e) => setValues((prev) => ({ ...prev, [f.name]: e.target.value }))}
+                placeholder={f.placeholder ?? `Enter ${f.label.toLowerCase()}…`}
+                className="w-full h-9 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 text-sm text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+              />
+            </div>
+          ))}
+        </div>
+
+        <Button
+          type="button"
+          className="w-full"
+          disabled={!requiredFilled}
+          onClick={() => onApprove({ metadata: values })}
+        >
+          {requiredFilled ? `Save ${destLabel} settings` : "Fill required fields above"}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+
 // ── Public component — routes to correct variant ───────────────────────────
 
 export function HitlApprovalCard(props: HitlApprovalCardProps) {
@@ -1240,6 +2196,32 @@ export function HitlApprovalCard(props: HitlApprovalCardProps) {
       return <ResolveFieldsCard {...cardProps} />;
     case "activate_confirm":
       return <ActivateConfirmCard {...cardProps} />;
+    // ── Funnel phase interrupts ────────────────────────────────────────────
+    case "funnel_prompt":
+      return <FunnelPromptCard {...cardProps} />;
+    case "funnel_stages":
+      return <FunnelStagesCard {...cardProps} />;
+    // ── Validation phase interrupts ────────────────────────────────────────
+    case "validation_errors":
+      return <ValidationErrorsCard {...cardProps} />;
+    // ── Token-gated activation confirm ─────────────────────────────────────
+    case "activation_confirm":
+      return <ActivationConfirmTokenCard {...cardProps} />;
+    // ── New interrupt types ────────────────────────────────────────────────
+    case "mapping_matrix":
+      return <MappingMatrixCard {...cardProps} />;
+    case "google_ads_account":
+      return <GoogleAdsAccountCard {...cardProps} />;
+    case "google_conversion_action":
+      return <GoogleConversionActionCard {...cardProps} />;
+    case "coverage_breakdown":
+      return <CoverageBreakdownCard {...cardProps} />;
+    case "canonical_needs":
+      return <CanonicalNeedsCard {...cardProps} />;
+    case "validation_dry_run":
+      return <ValidationDryRunCard {...cardProps} />;
+    case "destination_metadata":
+      return <DestinationMetadataCard {...cardProps} />;
     default:
       return null;
   }

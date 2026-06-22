@@ -28,6 +28,7 @@ from app.core.logging import (
 from app.models import Session
 from app.models import User
 from app.schemas import (
+    SessionCreate,
     SessionResponse,
     TokenResponse,
     UserCreate,
@@ -242,28 +243,40 @@ async def login(
 
 
 @router.post("/session", response_model=SessionResponse)
-async def create_session(user: User = Depends(get_current_user)):
-    """Create a new chat session for the authenticated user.
+async def create_session(
+    body: SessionCreate,
+    user: User = Depends(get_current_user),
+):
+    """Create a new agent session scoped to a project.
+
+    The project must already exist (POST /projects/ first).
+    The returned session token is used as the Bearer token for all
+    subsequent /copilotkit/* agent calls.
 
     Args:
+        body: project_id (required) + optional name
         user: The authenticated user
 
     Returns:
-        SessionResponse: The session ID, name, and access token
+        SessionResponse: session_id, name, and Bearer token
     """
     try:
-        # Generate a unique session ID
         session_id = str(uuid.uuid4())
 
-        session = await db_service.create_session(session_id, user.id)
+        session = await db_service.create_session(
+            session_id,
+            user.id,
+            name=body.name,
+            project_id=body.project_id,
+        )
 
-        # Create access token for the session
         token = create_access_token(session_id)
 
         logger.info(
             "session_created",
             session_id=session_id,
             user_id=user.id,
+            project_id=str(body.project_id),
             name=session.name,
             expires_at=token.expires_at.isoformat(),
         )

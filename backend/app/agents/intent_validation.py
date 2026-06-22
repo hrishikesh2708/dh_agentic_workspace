@@ -15,7 +15,7 @@ def source_connector_id(source: Sources | None, *, fallback: str = "") -> str:
     """Return the connector slug stored on a :class:`Sources` value."""
     if source is None:
         return fallback
-    return source.connector_id
+    return source.connector_id or fallback
 
 
 def match_source_label(raw: str | None, sources: list[Sources]) -> Sources | None:

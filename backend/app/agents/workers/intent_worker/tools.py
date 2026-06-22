@@ -34,16 +34,62 @@ from app.agents.messages import (
 from app.agents.orchestrator.state import GlobalAgentState
 from app.schemas import Sources
 
+# Fields to clear when intent is re-parsed mid-flow (user hasn't confirmed yet).
+# Clears all downstream working/transient state so stale mapping or validation
+# data doesn't bleed into the new run.
 _MAPPING_RESET_KEYS: dict[str, Any] = {
+    # Mapping phase
     "mappings": [],
     "has_pending_review": False,
-    "session_id": None,
-    "canonical_session_id": None,
     "source_schema": None,
     "destination_schema": None,
     "vector_search_destination_type": None,
     "canonical_summary_shown": False,
     "available_objects": [],
+    "resolve_fields_done": False,
+    "canonical_mapping_approved": False,
+    "mapping_complete_shown": False,
+    "mapping_phase_complete": False,
+    # Validation phase
+    "validation_snapshot": [],
+    "validation_errors": [],
+    "validation_warnings": [],
+    "validation_passed": False,
+    "validation_phase_complete": False,
+    # Confirm phase — never carry a token across intent resets
+    "pending_confirm_token": None,
+    "received_confirm_token": None,
+    "confirmation_phase_complete": False,
+    # Mid-flow routing
+    "pending_action": None,
+}
+
+# Full wipe used when the user explicitly rejects the intent summary and starts
+# over. Extends _MAPPING_RESET_KEYS to also clear connection, source-object,
+# and funnel state — everything downstream of intent.
+_FULL_RESET_KEYS: dict[str, Any] = {
+    **_MAPPING_RESET_KEYS,
+    # Connection phase
+    "source_connected": False,
+    "source_connection_id": None,
+    "channel_statuses": {},
+    "destination_connection_ids": {},
+    "deferred_destinations": [],
+    "connection_phase_complete": False,
+    # Source object phase
+    "source_object": "",
+    "schema_snapshot": [],
+    "source_object_phase_complete": False,
+    # Funnel phase
+    "funnel_enabled": False,
+    "funnel_trigger_field": None,
+    "available_stage_values": [],
+    "funnel_stages": [],
+    "funnel_phase_complete": False,
+    # Activation phase — safety net (shouldn't be set, but wipe if somehow set)
+    "pipeline_activated": False,
+    "integration_ids": {},
+    "activated_config_version": None,
 }
 
 
@@ -204,7 +250,12 @@ def _resume_selected(response: Any, *, fallback: str) -> str:
 
 
 async def _coerce_source(source_id: str) -> Sources:
-    """Resolve a source slug (from HITL or parsing) to a :class:`Sources` row."""
+    """Resolve a source slug to the full :class:`Sources` registry row.
+
+    state.source holds the full object so downstream workers can read
+    display_name, sub_connector_of etc. without extra DB round-trips.
+    Falls back to a minimal Sources instance when the slug is unrecognised.
+    """
     needle = source_id.lower().strip()
     sources = await deps.source_registry.list_source()
     for source in sources:
@@ -1518,13 +1569,14 @@ async def handle_confirmation(state: GlobalAgentState) -> dict[str, Any]:
         }
 
     # --- Path 3: Full rejection --------------------------------------------------
+    # User rejected the intent summary — wipe all downstream phase state so the
+    # next run starts completely clean (connection, funnel, mapping, confirm, etc.)
     else:
         return {
-            **_MAPPING_RESET_KEYS,
+            **_FULL_RESET_KEYS,
             "signal_type": None,
             "signal_type_confidence": None,
             "source": None,
-            "source_object": "",
             "destinations": [],
             "intent_phase": "idle",
             "intent_phase_complete": False,

@@ -346,6 +346,7 @@ async def canonical_mapping_node(state: GlobalAgentState) -> dict[str, Any]:
     return {
         "mappings": updated_mappings,
         "canonical_mapping_approved": approved,
+        "confirmed_config_hash": None,
     }
 
 
@@ -439,6 +440,7 @@ async def resolve_fields_node(state: GlobalAgentState) -> dict[str, Any]:
     return {
         "mappings": mappings,
         "resolve_fields_done": True,
+        "confirmed_config_hash": None,
     }
 
 
@@ -457,7 +459,10 @@ def _suggest_constant(canonical_key: str) -> str | None:
 
 
 async def mapping_complete(state: GlobalAgentState) -> dict[str, Any]:
-    """Emit a summary step card — no interrupt, just an agent_event message."""
+    """Emit a summary step card — no interrupt, just an agent_event message.
+
+    Sets mapping_phase_complete=True to hand off to the validation phase.
+    """
     total = len(state.required_canonical_keys)
     mapped = len(_mapped_keys(state.mappings))
 
@@ -472,76 +477,6 @@ async def mapping_complete(state: GlobalAgentState) -> dict[str, Any]:
 
     return {
         "mapping_complete_shown": True,
+        "mapping_phase_complete": True,
         "messages": [_agent_event(message, status="confirmed")],
-    }
-
-
-# ---------------------------------------------------------------------------
-# Node 6 — activate_confirm  (HITL — mock activation)
-# ---------------------------------------------------------------------------
-
-
-async def activate_confirm(state: GlobalAgentState) -> dict[str, Any]:
-    """Final HITL — show activation summary and confirm.
-
-    Payload type: "activate_confirm" → ActivateConfirmCard
-    Resume:  { action: "activate" }  — mock, no DB writes.
-    """
-    source_id = source_connector_id(state.source) or "salesforce"
-    try:
-        src_label = await deps.connector_schema.source_label(source_id)
-    except Exception:
-        src_label = source_id
-
-    dest_labels = []
-    for d in state.destinations or []:
-        try:
-            dest_labels.append(await deps.connector_schema.destination_label(d))
-        except Exception:
-            dest_labels.append(d)
-
-    total = len(state.required_canonical_keys)
-    mapped = len(_mapped_keys(state.mappings))
-    unresolved = total - mapped
-
-    checks = [
-        f"✓ {mapped} of {total} required fields mapped",
-        f"✓ {src_label} connected",
-        f"✓ {len(dest_labels)} destination(s) connected",
-    ]
-    if unresolved:
-        checks.append(f"⚠ {unresolved} field(s) unresolved (optional)")
-
-    payload = {
-        "type": "activate_confirm",
-        "validation": {
-            "title": "Ready to activate",
-            "checks": checks,
-        },
-        "summary_card": {
-            "title": f"{src_label} {state.source_object} → {', '.join(dest_labels)}",
-            "lines": [
-                f"Signal type: {state.signal_type or 'Offline Conversion'}",
-                f"{mapped} canonical fields mapped",
-            ],
-        },
-        "confirm_label": "Activate Pipeline",
-        "secondary_label": "Review mapping",
-    }
-
-    hitl_interruptions_total.labels(interrupt_type="activate_confirm").inc()
-    response: Any = interrupt(payload)
-
-    if isinstance(response, dict) and response.get("action") == "activate":
-        return {
-            "pipeline_activated": True,
-            "mapping_phase_complete": True,
-            "messages": [_agent_event("Pipeline Activated", status="confirmed")],
-        }
-
-    # User chose "Review mapping" — reset back to canonical_mapping
-    return {
-        "canonical_mapping_approved": False,
-        "resolve_fields_done": False,
-        "mapping_complete_shown": False,
     }

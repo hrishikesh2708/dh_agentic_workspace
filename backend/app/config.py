@@ -245,10 +245,16 @@ class Settings:
         # Meta (Facebook) integration
         self.META_APP_ID = os.getenv("META_APP_ID", "")
         self.META_APP_SECRET = os.getenv("META_APP_SECRET", "")
+        # Optional: set this in dev to route test events to the Meta Test Events tool
+        self.META_TEST_EVENT_CODE = os.getenv("META_TEST_EVENT_CODE", "")
 
         # Google integration
         self.GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
         self.GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+        # Required for Google Ads API calls (dry-run + future sync)
+        self.GOOGLE_ADS_DEVELOPER_TOKEN = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN", "")
+        # Google Ads API version — update when upgrading the client library
+        self.GOOGLE_API_VERSION = os.getenv("GOOGLE_API_VERSION", "v17")
 
         # TikTok integration
         self.TIKTOK_APP_ID = os.getenv("TIKTOK_APP_ID", "")

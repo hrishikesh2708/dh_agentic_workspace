@@ -1,6 +1,6 @@
 """mapping_worker sub-graph — flattened into the supervisor graph.
 
-Node flow (within a single turn after connection_phase_complete)::
+Node flow (within a single turn after funnel_phase_complete)::
 
     fetch_schemas
          │
@@ -10,14 +10,11 @@ Node flow (within a single turn after connection_phase_complete)::
          │
     resolve_fields     ←── HITL: conditional, only if required keys unmatched
          │
-    mapping_complete   ←── StepCompleteCard (informational, no interrupt)
+    mapping_complete   ←── StepCompleteCard; sets mapping_phase_complete=True
          │
-    activate_confirm   ←── HITL: mock activation
-         │
-        END
+    next_phase_entry   →  validation_worker
 
-Router (_map_route_next) is called after every node and drives transitions
-purely from state — no LLM calls in the router.
+Router is created by _make_map_router and called after every mapping node.
 """
 
 from __future__ import annotations
@@ -28,7 +25,6 @@ from langgraph.graph import END, StateGraph
 
 from app.agents.orchestrator.state import GlobalAgentState
 from app.agents.workers.mapping_worker.tools import (
-    activate_confirm,
     canonical_mapping_node,
     fetch_schemas,
     mapping_complete,
@@ -36,80 +32,65 @@ from app.agents.workers.mapping_worker.tools import (
     run_mapping,
 )
 
-# ---------------------------------------------------------------------------
-# Router
-# ---------------------------------------------------------------------------
-
 _MAPPING_NODES = [
     "fetch_schemas",
     "run_mapping",
     "canonical_mapping",
     "resolve_fields",
     "mapping_complete",
-    "activate_confirm",
 ]
 
 
-def _map_route_next(state: GlobalAgentState) -> str:
-    """Central router for the mapping phase.
+def _make_map_router(next_phase_entry: str):
+    """Return a router that transitions to next_phase_entry when mapping_phase_complete."""
 
-    Called after every mapping node. Drives transitions purely from state.
+    def _map_route_next(state: GlobalAgentState) -> str:
+        if state.mapping_phase_complete:
+            return next_phase_entry
 
-    Priority order:
-    1. Done — pipeline activated or phase complete → END
-    2. Schema not loaded → fetch_schemas
-    3. No mappings yet → run_mapping
-    4. Canonical HITL not approved → canonical_mapping
-    5. Required keys unresolved → resolve_fields
-    6. Summary not shown → mapping_complete
-    7. Activation not done → activate_confirm
-    """
-    if state.pipeline_activated or state.mapping_phase_complete:
-        return END
+        if not state.source_schema or not state.required_canonical_keys:
+            return "fetch_schemas"
 
-    if not state.source_schema or not state.required_canonical_keys:
-        return "fetch_schemas"
+        if not state.mappings:
+            return "run_mapping"
 
-    if not state.mappings:
-        return "run_mapping"
+        if not state.canonical_mapping_approved:
+            return "canonical_mapping"
 
-    if not state.canonical_mapping_approved:
-        return "canonical_mapping"
+        already_mapped = {
+            m.destination_field
+            for m in state.mappings
+            if m.destination_field and m.source_field and m.status not in ("unmatched", "not_proposed")
+        }
+        unresolved = [k for k in state.required_canonical_keys if k not in already_mapped]
+        if unresolved and not state.resolve_fields_done:
+            return "resolve_fields"
 
-    # Check if any required canonical keys are still unresolved
-    already_mapped = {
-        m.destination_field
-        for m in state.mappings
-        if m.destination_field and m.source_field and m.status not in ("unmatched", "not_proposed")
-    }
-    unresolved = [k for k in state.required_canonical_keys if k not in already_mapped]
-    if unresolved and not state.resolve_fields_done:
-        return "resolve_fields"
+        if not state.mapping_complete_shown:
+            return "mapping_complete"
 
-    if not state.mapping_complete_shown:
-        return "mapping_complete"
+        return next_phase_entry
 
-    return "activate_confirm"
+    return _map_route_next
 
 
-# ---------------------------------------------------------------------------
-# Sub-graph builder
-# ---------------------------------------------------------------------------
-
-
-def wire_mapping_phase(builder: StateGraph) -> str:
+def wire_mapping_phase(builder: StateGraph, next_phase_entry: str = END) -> str:
     """Wire all mapping nodes into the parent supervisor graph.
 
-    All nodes share ``_map_route_next`` as their conditional edge target.
-    Returns the entry-point node name so the supervisor can wire its
-    incoming edge from the connection phase.
+    Args:
+        builder: The parent StateGraph to add nodes to.
+        next_phase_entry: Node name to route to when mapping_phase_complete.
+                          Defaults to END.
+
+    Returns the entry-point node name.
     """
     builder.add_node("fetch_schemas", fetch_schemas)
     builder.add_node("run_mapping", run_mapping)
     builder.add_node("canonical_mapping", canonical_mapping_node)
     builder.add_node("resolve_fields", resolve_fields_node)
     builder.add_node("mapping_complete", mapping_complete)
-    builder.add_node("activate_confirm", activate_confirm)
+
+    map_route_next = _make_map_router(next_phase_entry)
 
     _route_targets: dict[str, str] = {
         "fetch_schemas": "fetch_schemas",
@@ -117,12 +98,13 @@ def wire_mapping_phase(builder: StateGraph) -> str:
         "canonical_mapping": "canonical_mapping",
         "resolve_fields": "resolve_fields",
         "mapping_complete": "mapping_complete",
-        "activate_confirm": "activate_confirm",
-        END: END,
+        next_phase_entry: next_phase_entry,
     }
+    if next_phase_entry != END:
+        _route_targets[END] = END
 
     route_map = cast(dict[Hashable, str], _route_targets)
     for node in _MAPPING_NODES:
-        builder.add_conditional_edges(node, _map_route_next, route_map)
+        builder.add_conditional_edges(node, map_route_next, route_map)
 
     return "fetch_schemas"

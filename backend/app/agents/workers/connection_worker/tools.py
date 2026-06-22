@@ -354,8 +354,10 @@ async def check_source_connection(state: GlobalAgentState) -> dict[str, Any]:
             return {}
 
     src_label = await deps.connector_schema.source_label(source_id)
+    conn_id = existing.id if existing else None
     return {
         "source_connected": True,
+        "source_connection_id": conn_id,
         "messages": [
             AIMessage(
                 content=json.dumps(
@@ -452,9 +454,65 @@ async def gather_object(state: GlobalAgentState) -> dict[str, Any]:
 
     messages.append(await intent_gather_event("object", "confirmed", source_id=source, source_object=selected))
 
+    # Fetch SF field schema for the chosen object — stored in schema_snapshot
+    # so funnel_worker can detect picklist fields without another API call.
+    schema_snapshot: list[dict] = []
+    if state.project_id:
+        try:
+            sf = deps.salesforce_for_project(state.project_id)
+            source_schema = await sf.load_source_schema(selected)
+            schema_snapshot = [
+                {
+                    "name": f.name,
+                    "label": f.label,
+                    "type": f.type,
+                    "picklist_values": f.picklist_values,
+                }
+                for f in (source_schema.fields if source_schema else [])
+            ]
+        except Exception:
+            logger.exception("gather_object_schema_fetch_failed", source_object=selected)
+
+    # ── Related-object identity augmentation ──────────────────────────────────
+    # Opportunity has no person fields — pull Contact identity via
+    # OpportunityContactRole join for CAPI/Google email matching.
+    try:
+        from app.agents.canonical_map import RELATED_IDENTITY_OBJECT, RELATED_IDENTITY_FIELDS
+
+        related_obj = RELATED_IDENTITY_OBJECT.get(selected or "")
+        if related_obj:
+            existing_names = {f.get("name", "") for f in schema_snapshot}
+            augmented_fields = [
+                {
+                    "name": f"Contact.{field}",
+                    "label": f"Contact: {field}",
+                    "type": "string",
+                    "custom": False,
+                    "picklist_values": [],
+                    "_augmented": True,
+                    "_join": "via OpportunityContactRole (IsPrimary = true)",
+                }
+                for field in RELATED_IDENTITY_FIELDS
+                if f"Contact.{field}" not in existing_names
+            ]
+            if augmented_fields:
+                schema_snapshot = list(schema_snapshot) + augmented_fields
+    except Exception:
+        pass  # Augmentation is best-effort
+
+    # Compute fingerprint and raw field names for state
+    from app.agents.safe import compute_schema_fingerprint
+
+    raw_sf_fields = [f.get("name", "") for f in schema_snapshot if f.get("name")]
+    schema_fingerprint = compute_schema_fingerprint(schema_snapshot)
+
     result: dict[str, Any] = {
         "source_object": selected,
         "available_objects": objects,
+        "schema_snapshot": schema_snapshot,
+        "raw_sf_fields": raw_sf_fields,
+        "schema_fingerprint": schema_fingerprint,
+        "source_object_phase_complete": True,
         "messages": messages,
     }
     if source != initial_source:
@@ -522,13 +580,21 @@ async def check_channel_connections(state: GlobalAgentState) -> dict[str, Any]:
 
     # ── Final DB read for confirmed statuses ─────────────────────────────
     final_statuses: dict[str, str] = {}
+    destination_connection_ids: dict[str, str] = {}
+    deferred_destinations: list[str] = list(state.deferred_destinations or [])
+
     for dest_id in destinations:
         if dest_id in skipped:
             final_statuses[dest_id] = "skipped"
-        elif project_id and _lookup_active_connection(project_id, dest_id):
-            final_statuses[dest_id] = "connected"
+            if dest_id not in deferred_destinations:
+                deferred_destinations.append(dest_id)
         else:
-            final_statuses[dest_id] = "not_connected"
+            conn = _lookup_active_connection(project_id, dest_id) if project_id else None
+            if conn:
+                final_statuses[dest_id] = "connected"
+                destination_connection_ids[dest_id] = str(conn.id)
+            else:
+                final_statuses[dest_id] = "not_connected"
 
     messages: list[Any] = []
     for dest_id, status in final_statuses.items():
@@ -550,6 +616,8 @@ async def check_channel_connections(state: GlobalAgentState) -> dict[str, Any]:
 
     return {
         "channel_statuses": final_statuses,
+        "destination_connection_ids": destination_connection_ids,
+        "deferred_destinations": deferred_destinations,
         "connection_phase_complete": True,
         "messages": messages,
     }

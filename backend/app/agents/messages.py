@@ -431,7 +431,7 @@ def build_mapping_complete_payload(
     source_label: str,
     destination_label: str,
     destination_type: str,
-    session_id: int | None = None,
+    session_id: int | str | None = None,
 ) -> dict[str, Any]:
     """Final 'mapping_complete' payload sent to the UI after a stage finishes."""
     auto = sum(1 for m in mappings if m.get("status") == "auto_approved")
@@ -457,7 +457,7 @@ def build_mapping_complete_payload(
 def canonical_stage_complete_message(
     state: GlobalAgentState,
     mappings: list[dict],
-    session_id: int | None = None,
+    session_id: int | str | None = None,
 ) -> AIMessage:
     """'Mapping complete' for the canonical stage (always followed by projection or END)."""
     source_object = state.source_object or "records"
@@ -476,7 +476,7 @@ def canonical_stage_complete_message(
 
 
 async def mapping_complete_message(state: GlobalAgentState) -> AIMessage:
-    """Final 'mapping_complete' message (sent by done_summary)."""
+    """Final 'mapping_complete' message (sent by mapping_worker/mapping_complete node)."""
     mappings = [m.model_dump() for m in state.mappings]
     run_mode = state.run_mode or "canonical_only"
     mapping_kind = "projection" if run_mode == "projection" else "canonical"
@@ -530,3 +530,28 @@ def extract_json(text: str) -> dict:
             except json.JSONDecodeError:
                 pass
     return {}
+
+
+def agent_progress_event(
+    message: str,
+    phase: str,
+    phase_index: int,
+    total_phases: int = 8,
+    status: str = "in_progress",
+) -> AIMessage:
+    """Build an agent_event message with step progress metadata.
+
+    The frontend uses step/total_steps to render a 'Step N of 8' indicator.
+    """
+    return AIMessage(
+        content=json.dumps(
+            {
+                "type": "agent_event",
+                "status": status,
+                "message": message,
+                "phase": phase,
+                "step": phase_index + 1,
+                "total_steps": total_phases,
+            }
+        )
+    )

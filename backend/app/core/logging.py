@@ -16,8 +16,12 @@ from typing import (
     Dict,
     List,
     Optional,
-    override,
 )
+
+try:
+    from typing import override
+except ImportError:
+    from typing_extensions import override
 
 import structlog
 from asgi_correlation_id import correlation_id

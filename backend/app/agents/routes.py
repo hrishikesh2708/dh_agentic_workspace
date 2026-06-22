@@ -14,9 +14,9 @@ protocol. The stock CopilotKit FastAPI handler only supports legacy
 ``execute()`` agents and treats every POST to ``/`` as an info request,
 which is why chat messages were getting info JSON back instead of SSE events.
 
-Per-request user identity is stashed on ``request.state`` so the graph's
-node functions can read ``request.state.customer_id`` if they need to
-correlate with the framework's ``user`` table.
+Per-request user identity is injected into ``GlobalAgentState.user_id`` (int)
+via ``_inject_session_context``, and also stashed on ``request.state.customer_id``
+for HTTP middleware/logging use.
 """
 
 from __future__ import annotations
@@ -142,7 +142,7 @@ def _inject_session_context(
     3. X-Project-Id request header (sent by the frontend on every agent call)
     """
     state = dict(run_body.get("state") or {})
-    state.setdefault("customer_id", session.user_id)
+    state.setdefault("user_id", session.user_id)
     if not state.get("project_id"):
         if session.project_id:
             state["project_id"] = str(session.project_id)

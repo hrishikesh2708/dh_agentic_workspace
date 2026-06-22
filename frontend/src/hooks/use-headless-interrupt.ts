@@ -60,15 +60,19 @@ export type CanonicalMappingRow = {
  *
  * Interrupt sequence (agreed order):
  * ─────────────────────────────────────────────────────────────────────
- * 1. "select_channels"   pick ad platforms (multi-select chips)
- * 2. "select_source"     pick CRM / source system (single-select chips)
- * 3. "check_connection"  single source connection status (red/amber/green)
- * 4. "select_object"     pick Salesforce object (single-select chips)
- * 5. "check_channels"    multi-destination connection status (avatar rows)
- * 6. "mapping_review"    review field mapping — single or multi destination
- * 7. "canonical_mapping" review canonical layer (inverted layout)
- * 8. "resolve_fields"    fix unresolved fields (amber → green)
- * 9. "activate_confirm"  validation result + activate CTA
+ * 1.  "select_channels"    pick ad platforms (multi-select chips)
+ * 2.  "select_source"      pick CRM / source system (single-select chips)
+ * 3.  "check_connection"   single source connection status (red/amber/green)
+ * 4.  "select_object"      pick Salesforce object (single-select chips)
+ * 5.  "check_channels"     multi-destination connection status (avatar rows)
+ * 6.  "mapping_review"     review field mapping — single or multi destination
+ * 7.  "canonical_mapping"  review canonical layer (inverted layout)
+ * 8.  "resolve_fields"     fix unresolved fields (amber → green)
+ * 9.  "funnel_prompt"      enable/disable funnel + pick trigger field
+ * 10. "funnel_stages"      map picklist values to named funnel stages
+ * 11. "validation_errors"  show validation errors, offer fix/skip/retry
+ * 12. "activation_confirm" token-gated activation — user types UUID back
+ * (legacy) "activate_confirm"  old validation+activate card (kept for compat)
  */
 export type ApprovalInterruptPayload = {
   type?: string;
@@ -98,7 +102,10 @@ export type ApprovalInterruptPayload = {
   account_detail?: string;  // e.g. "Acme Corp · john@acme.com" — shown when connected
   // mapping_review (row-based, single or multi-destination)
   destinations?: MappingDestination[];
-  rows?: MappingReviewRow[];
+  rows?: MappingReviewRow[] | Array<{
+    canonical_key: string; label: string; source_field: string | null;
+    status: string; cells: Record<string, { field: string | null; status: string }>;
+  }>;
   source_fields?: string[]; // full list of available Salesforce fields for the dropdowns
   // canonical_mapping
   canonical_rows?: CanonicalMappingRow[];
@@ -119,6 +126,59 @@ export type ApprovalInterruptPayload = {
   summary_card?: { title: string; lines: string[] };
   confirm_label?: string;
   secondary_label?: string;
+  // connect_source — OAuth handoff fields
+  connector_slug?: string;
+  project_id?: string;
+  // funnel_prompt — enable/disable funnel + pick trigger field
+  // resume: { enabled: bool, trigger_field: string | null }
+  picklist_fields?: Array<{ name: string; label: string }>;
+  suggested_trigger_field?: string;
+  // funnel_stages — map picklist values to stage definitions
+  // resume: { stages: [...] }
+  trigger_field?: string;
+  available_stage_values?: string[];
+  suggested_stages?: Array<{
+    stage_name: string; trigger_value: string;
+    time_field?: string; value_field?: string;
+    per_destination?: Record<string, unknown>;
+  }>;
+  datetime_fields?: string[];
+  numeric_fields?: string[];
+  active_destinations?: string[];
+  // validation_errors — show errors/warnings, offer fix/skip/retry
+  // resume: { action: "edit_mapping" | "skip_errors" | "retry" }
+  errors?: string[];
+  warnings?: string[];
+  // activation_confirm — token-gated confirmation
+  // resume: { token: str }
+  token?: string;
+  summary?: string[];
+  // mapping_matrix (rows field above is shared — union covers both shapes)
+  // google_ads_account
+  accounts?: Array<{ value: string; label: string }>;
+  // google_conversion_action
+  conversion_actions?: Array<{ value: string; label: string }>;
+  account_id?: string;
+  // coverage_breakdown
+  destinations_breakdown?: Array<{
+    destination: string; coverage_pct: number;
+    match_keys_covered: string[]; match_keys_missing: string[];
+    status: string; required_count: number; mapped_count: number;
+  }>;
+  overall_pct?: number;
+  // canonical_needs
+  needs?: Array<{
+    canonical_key: string; label: string; reason: string; status: string; required: boolean;
+  }>;
+  // validation_dry_run
+  checks?: Array<{
+    name: string; passed: boolean; severity: string; message: string;
+    sample_payload?: Record<string, unknown>;
+  }>;
+  overall_passed?: boolean;
+  // destination_metadata
+  destination?: string;
+  fields?: Array<{ name: string; label: string; placeholder?: string; required?: boolean }>;
 };
 
 export type InterruptEvent = {
